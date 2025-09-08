@@ -1,14 +1,23 @@
 [versions]
 agp = "8.9.2"
-kotlin = "2.0.21"
+kotlin = "2.0.0"
 coreKtx = "1.16.0"
 junit = "4.13.2"
 junitVersion = "1.3.0"
 espressoCore = "3.7.0"
 appcompat = "1.7.1"
-material = "1.12.0"
-activity = "1.10.1"
 constraintlayout = "2.2.1"
+materialVersion = "1.13.0"
+
+# Suas versões existentes
+retrofit = "2.9.0"
+converterGson = "2.9.0"
+activity = "1.10.1" # Mantida para referência, usaremos activity-ktx
+
+# --- NOVAS VERSÕES ADICIONADAS ---
+lifecycle = "2.8.3" # Versão para ViewModel e Lifecycle
+room = "2.6.1" # Versão para o Room DB
+ksp = "2.0.0-1.0.21" # Versão do KSP (deve corresponder à do Kotlin)
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -16,11 +25,30 @@ junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
-material = { group = "com.google.android.material", name = "material", version.ref = "material" }
-androidx-activity = { group = "androidx.activity", name = "activity", version.ref = "activity" }
 androidx-constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
+material-v1130 = { module = "com.google.android.material:material", version.ref = "materialVersion" }
+
+# Suas libs existentes de rede
+retrofit = { module = "com.squareup.retrofit2:retrofit", version.ref = "retrofit" }
+converter-gson = { module = "com.squareup.retrofit2:converter-gson", version.ref = "converterGson" }
+
+# --- LIBS ESSENCIAIS ADICIONADAS ---
+
+# Substitui 'androidx-activity' para ter acesso ao 'by viewModels()'
+androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activity" }
+
+# ViewModel e Lifecycle
+androidx-lifecycle-viewmodel-ktx = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-ktx", version.ref = "lifecycle" }
+androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
+
+# --- LIBS PARA BANCO DE DADOS LOCAL (ROOM) ---
+androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
+androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 
+# --- NOVO PLUGIN ADICIONADO ---
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
