@@ -76,20 +76,10 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
-        android:text="Não possui uma conta?"
+        android:text="Não possui uma conta?\nCadastre-se no site"
         android:textColor="#FFFFFF"
         app:layout_constraintEnd_toEndOf="@+id/btLogin"
         app:layout_constraintTop_toBottomOf="@+id/btLogin" />
 
-    <Button
-        android:id="@+id/btRegisterPage"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:backgroundTint="@color/white"
-        android:text="Registrar"
-        android:textColor="@color/blue"
-        app:layout_constraintEnd_toEndOf="@+id/tvNoRegister"
-        app:layout_constraintTop_toBottomOf="@+id/tvNoRegister" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
