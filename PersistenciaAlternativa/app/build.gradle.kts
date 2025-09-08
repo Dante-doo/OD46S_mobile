@@ -1,16 +1,14 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.ksp)
-    //alias(libs.plugins.kotlin.android)
-    id("org.jetbrains.kotlin.android")
+    alias(libs.plugins.kotlin.android)
 }
 
 android {
-    namespace = "br.edu.utfpr.coletapb"
-    compileSdk = 35
+    namespace = "br.edu.utfpr.persistenciaalternativa"
+    compileSdk = 36
 
     defaultConfig {
-        applicationId = "br.edu.utfpr.coletapb"
+        applicationId = "br.edu.utfpr.persistenciaalternativa"
         minSdk = 25
         targetSdk = 35
         versionCode = 1
@@ -41,26 +39,10 @@ dependencies {
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
-    implementation(libs.androidx.constraintlayout)
-    implementation(libs.androidx.appcompat)
-    implementation(libs.material.v1130)
+    implementation(libs.material)
+    implementation(libs.androidx.activity)
     implementation(libs.androidx.constraintlayout)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
-
-    implementation(libs.retrofit)
-    implementation(libs.converter.gson)
-
-    // Activity KTX (substitua a dependência 'activity' por esta)
-    implementation(libs.androidx.activity.ktx)
-
-    // Lifecycle & ViewModel
-    implementation(libs.androidx.lifecycle.viewmodel.ktx)
-    implementation(libs.androidx.lifecycle.runtime.ktx)
-
-    // Room (Banco de dados local)
-    implementation(libs.androidx.room.runtime)
-    implementation(libs.androidx.room.ktx)
-    ksp(libs.androidx.room.compiler) // Use 'ksp' para o compilador
 }
