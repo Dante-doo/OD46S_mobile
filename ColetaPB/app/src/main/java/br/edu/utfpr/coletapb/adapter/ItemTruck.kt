@@ -9,6 +9,7 @@ import android.widget.BaseAdapter
 import android.widget.TextView
 import br.edu.utfpr.coletapb.R
 
+
 class ItemTruck(private val contexto: Context, private val lista: Cursor) : BaseAdapter() {
 
     override fun getCount(): Int {
