@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "br.edu.utfpr.coletapb"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "br.edu.utfpr.coletapb"
@@ -45,6 +45,10 @@ dependencies {
     implementation(libs.androidx.appcompat)
     implementation(libs.material.v1130)
     implementation(libs.androidx.constraintlayout)
+    implementation("androidx.appcompat:appcompat:1.7.1")
+    implementation("com.google.android.material:material:1.13.0")
+    implementation("androidx.activity:activity:1.11.0")
+    implementation("androidx.constraintlayout:constraintlayout:2.2.1")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
