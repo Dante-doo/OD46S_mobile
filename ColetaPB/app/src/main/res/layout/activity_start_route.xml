@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+xmlns:android="http://schemas.android.com/apk/res/android"
+xmlns:app="http://schemas.android.com/apk/res-auto"
+android:id="@+id/main"
+android:layout_width="match_parent"
+android:layout_height="match_parent"
+android:padding="16dp"
+android:background="@drawable/img_trash_truck_blue2">
+
+<TextView
+    android:id="@+id/tvHeader"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    android:text="Rota XXX"
+    android:textSize="24sp"
+    android:textStyle="bold"
+    android:textColor="@android:color/white"
+    app:layout_constraintTop_toTopOf="parent"
+    app:layout_constraintStart_toStartOf="parent"
+    app:layout_constraintEnd_toEndOf="parent"/>
+
+<TextView
+    android:id="@+id/tvSub"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    android:text="Bairros/Turno"
+    android:textSize="16sp"
+    android:textColor="@android:color/white"
+    app:layout_constraintTop_toBottomOf="@id/tvHeader"
+    app:layout_constraintStart_toStartOf="@id/tvHeader"
+    app:layout_constraintEnd_toEndOf="@id/tvHeader"
+    android:layout_marginTop="8dp"/>
+
+    <!-- INICIAR (visível no começo) -->
+    <Button
+        android:id="@+id/btStart"
+        android:layout_width="350dp"
+        android:layout_height="150dp"
+        android:layout_marginTop="32dp"
+        android:text="INICIAR"
+        android:textAllCaps="false"
+        android:textSize="48sp"
+        android:backgroundTint="@color/light_blue"
+        android:textColor="@color/white"
+        app:layout_constraintTop_toBottomOf="@id/tvSub"
+        app:layout_constraintStart_toStartOf="@id/tvSub"
+        app:layout_constraintEnd_toEndOf="@id/tvSub"
+        app:layout_constraintBottom_toTopOf="@+id/btIncident" />
+
+    <!-- FINALIZAR (mesmo lugar, começa oculto) -->
+    <Button
+        android:id="@+id/btFinish"
+        android:layout_width="350dp"
+        android:layout_height="150dp"
+        android:layout_marginTop="32dp"
+        android:text="FINALIZAR"
+        android:textAllCaps="false"
+        android:textSize="36sp"
+        android:backgroundTint="@android:color/holo_red_dark"
+        android:textColor="@color/white"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/tvSub"
+        app:layout_constraintStart_toStartOf="@id/tvSub"
+        app:layout_constraintEnd_toEndOf="@id/tvSub"
+        app:layout_constraintBottom_toTopOf="@+id/btIncident" />
+
+    <Button
+        android:id="@+id/btIncident"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="32dp"
+        android:text="IMPREVISTO"
+        android:textAllCaps="false"
+        android:backgroundTint="@color/light_blue"
+        android:textColor="@color/white"
+        android:enabled="true"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="@id/btFinish"
+        app:layout_constraintEnd_toEndOf="@id/btFinish" />
+</androidx.constraintlayout.widget.ConstraintLayout>
