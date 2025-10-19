@@ -3,6 +3,8 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <application
         android:allowBackup="true"
@@ -13,31 +15,37 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.ColetaPB"
-        tools:targetApi="31"
         android:usesCleartextTraffic="true"
-        >
-        <activity
-            android:name=".RouteList"
-            android:exported="false" />
-        <activity
-            android:name=".TruckList"
-            android:exported="false" />
-        <activity
-            android:name=".DriverRegister"
-            android:exported="false" />
-        <activity
-            android:name=".AdmRegister"
-            android:exported="false" />
+        tools:targetApi="31">
 
+        <!-- Tela inicial -->
         <activity
             android:name=".LoginPage"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-    </application>
 
+        <!-- Após login -->
+        <activity
+            android:name=".TruckList"
+            android:exported="false"
+            android:parentActivityName=".LoginPage" />
+
+        <!-- Da lista de caminhões para rotas -->
+        <activity
+            android:name=".RouteList"
+            android:exported="false"
+            android:parentActivityName=".TruckList" />
+
+        <!-- Da lista de rotas para iniciar rota -->
+        <activity
+            android:name=".StartRoute"
+            android:exported="false"
+            android:parentActivityName=".RouteList" />
+
+
+    </application>
 </manifest>
