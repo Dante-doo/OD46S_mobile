@@ -32,6 +32,7 @@ android:background="@drawable/img_trash_truck_blue2">
     app:layout_constraintEnd_toEndOf="@id/tvHeader"
     android:layout_marginTop="8dp"/>
 
+    <!-- INICIAR (visível no começo) -->
     <Button
         android:id="@+id/btStart"
         android:layout_width="350dp"
@@ -39,14 +40,30 @@ android:background="@drawable/img_trash_truck_blue2">
         android:layout_marginTop="32dp"
         android:text="INICIAR"
         android:textAllCaps="false"
-        android:textColorLink="#FFE6E6"
         android:textSize="48sp"
         android:backgroundTint="@color/light_blue"
         android:textColor="@color/white"
-        app:layout_constraintBottom_toTopOf="@+id/btIncident"
-        app:layout_constraintEnd_toEndOf="@id/tvSub"
+        app:layout_constraintTop_toBottomOf="@id/tvSub"
         app:layout_constraintStart_toStartOf="@id/tvSub"
-        app:layout_constraintTop_toBottomOf="@+id/tvSub" />
+        app:layout_constraintEnd_toEndOf="@id/tvSub"
+        app:layout_constraintBottom_toTopOf="@+id/btIncident" />
+
+    <!-- FINALIZAR (mesmo lugar, começa oculto) -->
+    <Button
+        android:id="@+id/btFinish"
+        android:layout_width="350dp"
+        android:layout_height="150dp"
+        android:layout_marginTop="32dp"
+        android:text="FINALIZAR"
+        android:textAllCaps="false"
+        android:textSize="36sp"
+        android:backgroundTint="@android:color/holo_red_dark"
+        android:textColor="@color/white"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/tvSub"
+        app:layout_constraintStart_toStartOf="@id/tvSub"
+        app:layout_constraintEnd_toEndOf="@id/tvSub"
+        app:layout_constraintBottom_toTopOf="@+id/btIncident" />
 
     <Button
         android:id="@+id/btIncident"
@@ -57,8 +74,8 @@ android:background="@drawable/img_trash_truck_blue2">
         android:textAllCaps="false"
         android:backgroundTint="@color/light_blue"
         android:textColor="@color/white"
+        android:enabled="true"
         app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="@+id/btStart"
-        app:layout_constraintHorizontal_bias="1.0"
-        app:layout_constraintStart_toStartOf="@+id/btStart" />
+        app:layout_constraintStart_toStartOf="@id/btFinish"
+        app:layout_constraintEnd_toEndOf="@id/btFinish" />
 </androidx.constraintlayout.widget.ConstraintLayout>

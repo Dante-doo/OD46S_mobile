@@ -9,27 +9,42 @@ import android.widget.TextView
 import br.edu.utfpr.coletapb.R
 import br.edu.utfpr.coletapb.data.RouteEntity
 
-class ItemRoute(context: Context, routes: List<RouteEntity>) :
-    ArrayAdapter<RouteEntity>(context, 0, routes) {
+class ItemRoute(
+    context: Context,
+    private val data: MutableList<RouteEntity> // backing list mutável
+) : ArrayAdapter<RouteEntity>(context, 0, data) {
+
+    // ViewHolder simples (performance)
+    private class VH(v: View) {
+        val title: TextView = v.findViewById(R.id.tvRoute)
+        val subtitle: TextView = v.findViewById(R.id.tvRouteInfo)
+    }
 
     override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-        // 1. Obtém o item da rota para esta posição
+        val view: View
+        val holder: VH
+        if (convertView == null) {
+            view = LayoutInflater.from(context).inflate(R.layout.item_route, parent, false)
+            holder = VH(view)
+            view.tag = holder
+        } else {
+            view = convertView
+            holder = view.tag as VH
+        }
+
         val route = getItem(position)
-
-        // 2. Infla o layout do item da lista se não estiver sendo reutilizado
-        val view = convertView ?: LayoutInflater.from(context)
-            .inflate(R.layout.item_route, parent, false)
-
-        // 3. Encontra os TextViews no layout do item
-        val tvTitle = view.findViewById<TextView>(R.id.tvRoute)
-        val tvSubtitle = view.findViewById<TextView>(R.id.tvRouteInfo)
-
-        // 4. Preenche os dados da rota nos TextViews
         if (route != null) {
-            tvTitle.text = route.name
-            tvSubtitle.text = route.description
+            holder.title.text = route.name
+            holder.subtitle.text = route.description
         }
 
         return view
+    }
+
+    /** Atualiza os dados sem recriar o adapter */
+    fun setData(newData: List<RouteEntity>) {
+        data.clear()
+        data.addAll(newData)
+        notifyDataSetChanged()
     }
 }
