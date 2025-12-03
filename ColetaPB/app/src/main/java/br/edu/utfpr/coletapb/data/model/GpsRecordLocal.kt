@@ -10,5 +10,7 @@ data class GpsRecordLocal(
     val timestamp: Long,
     val lat: Double,
     val lng: Double,
-    val eventType: String         // START | STOP | END | NORMAL
+    val eventType: String,         // START | STOP | END | NORMAL | INCIDENT
+    val isOffline: Boolean = true, // Flag para indicar se precisa sincronizar
+    val backendId: Long? = null    // ID no backend após sincronização
 )

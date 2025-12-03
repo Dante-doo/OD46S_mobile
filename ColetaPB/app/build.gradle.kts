@@ -55,6 +55,7 @@ dependencies {
 
     implementation(libs.retrofit)
     implementation(libs.converter.gson)
+    implementation(libs.okhttp)
 
     // Activity KTX (substitua a dependência 'activity' por esta)
     implementation(libs.androidx.activity.ktx)
@@ -62,6 +63,10 @@ dependencies {
     // Lifecycle & ViewModel
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.service)
+    
+    // SwipeRefreshLayout
+    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
 
     // Room (Banco de dados local)
     implementation(libs.androidx.room.runtime)

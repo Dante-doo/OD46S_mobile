@@ -3,6 +3,7 @@ package br.edu.utfpr.coletapb
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
+import android.widget.Button
 import android.widget.ListView
 import android.widget.Toast
 import androidx.activity.viewModels
@@ -34,7 +35,7 @@ class RouteList : AppCompatActivity() {
     private var driverId: Long = 0L // ID do motorista logado
 
     // --- INICIALIZAÇÃO DO VIEWMODEL ---
-    private val viewModel: RouteViewModel by viewModel {
+    private val viewModel: RouteViewModel by viewModels {
         RouteViewModelFactory(
             RouteRepository(RetrofitClient.apiService)
         )
@@ -46,19 +47,32 @@ class RouteList : AppCompatActivity() {
         setContentView(R.layout.activity_route_list)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
+        // Verifica se está logado
+        val prefsHelper = br.edu.utfpr.coletapb.data.local.SharedPreferencesHelper(this)
+        val hasToken = prefsHelper.getToken() != null
+        
+        if (!hasToken) {
+            Log.w("RouteList", "Token não encontrado, redirecionando para login")
+            val intent = Intent(this, br.edu.utfpr.coletapb.LoginPage::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            }
+            startActivity(intent)
+            finish()
+            return
+        }
+
         // 1. Obter os IDs passados pela Intent
         truckId = intent.getLongExtra("truck_id", 0L)
-
-        // --- ATENÇÃO ---
-        // Precisa add a Intent na TruckList.kt.
-        // Exemplo:
-        // driverId = intent.getLongExtra("driver_id", 0L)
-
+        
+        // 2. Obter driverId do SharedPreferences (salvo no login)
+        driverId = prefsHelper.getDriverId()
+        
         if (driverId == 0L) {
-            Log.w("RouteList", "Driver ID não recebido, usando '1' como teste.")
-            driverId = 1L // << SUBSTITUIR QUANDO TIVER O ID REAL
+            Log.w("RouteList", "Driver ID não encontrado no login. Verifique se o usuário é um motorista.")
+            Toast.makeText(this, "Usuário não é um motorista ou dados inválidos.", Toast.LENGTH_LONG).show()
+            finish()
+            return
         }
-        // -----------------------------------------------------------------
 
         // Validar se recebemos os IDs necessários
         if (truckId == 0L || driverId == 0L) {
@@ -74,10 +88,25 @@ class RouteList : AppCompatActivity() {
         adapter = ItemRoute(this@RouteList, mutableListOf())
         listView.adapter = adapter
 
-        // 3. Observar as mudanças de estado do ViewModel
+        // 3. Configurar botões fixos
+        val btnVoltar = findViewById<Button>(R.id.btnVoltar)
+        val btnAtualizar = findViewById<Button>(R.id.btnAtualizar)
+        
+        btnVoltar.setOnClickListener {
+            // Usa o comportamento padrão do Android para voltar
+            finish()
+        }
+        
+        btnAtualizar.setOnClickListener {
+            // Atualiza os dados da tela
+            viewModel.loadRoutes(driverId, truckId)
+            Toast.makeText(this, "Atualizando rotas...", Toast.LENGTH_SHORT).show()
+        }
+
+        // 4. Observar as mudanças de estado do ViewModel
         observeRouteState()
 
-        // 4. Pedir ao ViewModel para carregar os dados
+        // 5. Pedir ao ViewModel para carregar os dados
         viewModel.loadRoutes(driverId, truckId)
 
         // 5. Clique da lista (Lógica antiga está correta)
@@ -154,7 +183,14 @@ class RouteList : AppCompatActivity() {
     }
 
     override fun onSupportNavigateUp(): Boolean {
-        onBackPressedDispatcher.onBackPressed()
+        // Usa o comportamento padrão do Android para voltar
+        finish()
         return true
+    }
+    
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        // Usa o comportamento padrão do Android para voltar
+        super.onBackPressed()
     }
 }

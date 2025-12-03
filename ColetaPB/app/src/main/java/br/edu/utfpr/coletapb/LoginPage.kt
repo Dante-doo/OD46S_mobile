@@ -1,25 +1,36 @@
 package br.edu.utfpr.coletapb
 
-import android.content.Intent // IMPORT NECESSÁRIO
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.util.Patterns
 import android.widget.Button
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import br.edu.utfpr.coletapb.config.ApiConfig
+import br.edu.utfpr.coletapb.data.local.SharedPreferencesHelper
+import br.edu.utfpr.coletapb.data.model.LoginRequest
+import br.edu.utfpr.coletapb.data.remote.RetrofitClient
 import com.google.android.material.textfield.TextInputEditText
-import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
-import kotlin.concurrent.thread
+import kotlinx.coroutines.launch
+import retrofit2.HttpException
 
 class LoginPage : AppCompatActivity() {
+    
+    private lateinit var prefsHelper: SharedPreferencesHelper
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_login_page)
+        
+        // Inicializa RetrofitClient com contexto
+        RetrofitClient.init(this)
+        
+        prefsHelper = SharedPreferencesHelper(this)
+        
+        // Não redireciona automaticamente - sempre mostra a tela de login
+        // O usuário pode fazer logout se necessário
 
         val etEmailOrCpf = findViewById<TextInputEditText>(R.id.etCPF)
         val etPassword = findViewById<TextInputEditText>(R.id.etPassword)
@@ -34,62 +45,63 @@ class LoginPage : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            val jsonObject = JSONObject()
-            val isEmail = Patterns.EMAIL_ADDRESS.matcher(emailOrCpf).matches()
-            if (isEmail) {
-                jsonObject.put("email", emailOrCpf)
-            } else {
-                jsonObject.put("cpf", emailOrCpf)
-            }
-            jsonObject.put("password", password)
+            // Desabilita o botão durante o login
+            btLogin.isEnabled = false
+            btLogin.text = "Entrando..."
 
-            thread {
-                var connection: HttpURLConnection? = null
+            lifecycleScope.launch {
                 try {
-                    // Use o IP da sua máquina na rede local
-                    val url = URL("http://192.168.3.83:8080/api/v1/auth/login")
-                    connection = url.openConnection() as HttpURLConnection
-                    connection.requestMethod = "POST"
-                    connection.setRequestProperty("Content-Type", "application/json; utf-8")
-                    connection.setRequestProperty("Accept", "application/json")
-                    connection.doOutput = true
-
-                    OutputStreamWriter(connection.outputStream, "UTF-8").use { writer ->
-                        writer.write(jsonObject.toString())
-                        writer.flush()
+                    val isEmail = Patterns.EMAIL_ADDRESS.matcher(emailOrCpf).matches()
+                    val loginRequest = if (isEmail) {
+                        LoginRequest(email = emailOrCpf, password = password)
+                    } else {
+                        LoginRequest(cpf = emailOrCpf, password = password)
                     }
 
-                    val responseCode = connection.responseCode
-                    val reader = BufferedReader(InputStreamReader(connection.inputStream))
-                    val response = reader.readText()
-
-                    runOnUiThread {
-                        if (responseCode == HttpURLConnection.HTTP_OK) {
-                            Toast.makeText(this, "Login bem-sucedido!", Toast.LENGTH_LONG).show()
-                            Log.d("LoginPage", "Resposta da API: $response")
-
-                            // --- NAVEGAÇÃO PARA A TELA DE LISTA DE CAMINHÕES ---
-                            val intent = Intent(this, TruckList::class.java)
-
-                            startActivity(intent)
-
-                            finish()
-                        } else {
-                            Toast.makeText(this, "Falha no login: $responseCode", Toast.LENGTH_LONG).show()
-                            Log.e("LoginPage", "Erro ($responseCode): $response")
-                        }
+                    val response = RetrofitClient.apiService.login(loginRequest)
+                    
+                    if (response.isSuccessful && response.body() != null) {
+                        val loginResponse = response.body()!!
+                        
+                        // Salva token e informações do usuário
+                        prefsHelper.saveToken(loginResponse.token)
+                        prefsHelper.saveUserInfo(
+                            email = loginResponse.email,
+                            name = loginResponse.name,
+                            type = loginResponse.type,
+                            userId = loginResponse.userId,
+                            driverId = loginResponse.driverId,
+                            adminId = loginResponse.adminId
+                        )
+                        
+                        Log.d("LoginPage", "Login bem-sucedido: ${loginResponse.email} (${loginResponse.type})")
+                        Log.d("LoginPage", "UserId: ${loginResponse.userId}, DriverId: ${loginResponse.driverId}, AdminId: ${loginResponse.adminId}")
+                        Toast.makeText(this@LoginPage, "Bem-vindo, ${loginResponse.name}!", Toast.LENGTH_SHORT).show()
+                        
+                        navigateToTruckList()
+                    } else {
+                        val errorBody = response.errorBody()?.string() ?: "Erro desconhecido"
+                        Log.e("LoginPage", "Erro no login: ${response.code()} - $errorBody")
+                        Toast.makeText(this@LoginPage, "Credenciais inválidas. Verifique e tente novamente.", Toast.LENGTH_LONG).show()
                     }
-
+                } catch (e: HttpException) {
+                    Log.e("LoginPage", "Erro HTTP: ${e.code()} - ${e.message()}")
+                    Toast.makeText(this@LoginPage, "Erro ao conectar com o servidor. Verifique sua conexão.", Toast.LENGTH_LONG).show()
                 } catch (e: Exception) {
-                    e.printStackTrace()
-                    runOnUiThread {
-                        Toast.makeText(this, "Erro: ${e.message}", Toast.LENGTH_LONG).show()
-                        Log.e("LoginPage", "Exceção: ${e.message}")
-                    }
+                    Log.e("LoginPage", "Exceção: ${e.message}", e)
+                    Toast.makeText(this@LoginPage, "Erro: ${e.message}", Toast.LENGTH_LONG).show()
                 } finally {
-                    connection?.disconnect()
+                    // Reabilita o botão
+                    btLogin.isEnabled = true
+                    btLogin.text = "Entrar"
                 }
             }
         }
+    }
+    
+    private fun navigateToTruckList() {
+        val intent = Intent(this, TruckList::class.java)
+        startActivity(intent)
+        finish()
     }
 }
