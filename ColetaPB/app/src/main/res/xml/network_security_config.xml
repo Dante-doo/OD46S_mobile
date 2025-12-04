@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Permite conexões HTTPS com OpenStreetMap e outros serviços -->
+    <!-- Configuração base: aceita todos os certificados do sistema -->
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
+            <!-- Aceita certificados do sistema Android (inclui certificados de autoridades confiáveis) -->
             <certificates src="system" />
+            <!-- Aceita certificados de usuário instalados manualmente -->
             <certificates src="user" />
         </trust-anchors>
     </base-config>
@@ -14,10 +16,21 @@
         <domain includeSubdomains="true">a.tile.openstreetmap.org</domain>
         <domain includeSubdomains="true">b.tile.openstreetmap.org</domain>
         <domain includeSubdomains="true">c.tile.openstreetmap.org</domain>
+        <domain includeSubdomains="true">*.tile.openstreetmap.org</domain>
         <trust-anchors>
+            <!-- Aceita certificados do sistema para OpenStreetMap -->
             <certificates src="system" />
             <certificates src="user" />
         </trust-anchors>
     </domain-config>
+    
+    <!-- Configuração para permitir todos os domínios HTTPS (útil para desenvolvimento) -->
+    <!-- ATENÇÃO: Isso pode ser um risco de segurança em produção -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
 </network-security-config>
 

@@ -1,10 +1,12 @@
 package br.edu.utfpr.coletapb
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationManager
+import android.net.ConnectivityManager
 import android.provider.Settings
 import android.os.Bundle
 import android.util.Log
@@ -35,7 +37,10 @@ import com.google.android.gms.tasks.Tasks
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
+import br.edu.utfpr.coletapb.utils.CustomTileSource
+import br.edu.utfpr.coletapb.utils.SSLHelper
 import org.osmdroid.views.MapView
+import javax.net.ssl.HttpsURLConnection
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
@@ -181,12 +186,41 @@ class StartRoute : AppCompatActivity() {
         executionDao = db.executionDao()
         gpsDao = db.gpsDao()
 
-        // Configura OSMDroid
+        // Configura SSL globalmente para o OSMDroid
+        // Isso é necessário porque o OSMDroid usa HttpURLConnection que não respeita network_security_config.xml
+        SSLHelper.configureSSLForOSMDroid()
+        
+        // Configura OSMDroid - DEVE ser feito ANTES de criar o MapView
         Configuration.getInstance().load(this, getSharedPreferences("osmdroid", MODE_PRIVATE))
         
         // User-Agent obrigatório para baixar tiles do OpenStreetMap
-        // OpenStreetMap requer um User-Agent identificável
-        Configuration.getInstance().userAgentValue = "${packageName}/1.0"
+        // OpenStreetMap requer um User-Agent identificável e válido
+        // Formato recomendado: AppName/Version (OS; Device)
+        val userAgent = "ColetaPB/1.0 (Android ${android.os.Build.VERSION.RELEASE}; ${android.os.Build.MODEL})"
+        Configuration.getInstance().userAgentValue = userAgent
+        Log.d("StartRoute", "User-Agent configurado: $userAgent")
+        
+        // Verifica se há conexão com internet (com tratamento de erro caso não tenha permissão)
+        try {
+            val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = connectivityManager.activeNetwork
+            val capabilities = network?.let { connectivityManager.getNetworkCapabilities(it) }
+            val isConnected = capabilities != null && (
+                capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) ||
+                capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)
+            )
+            Log.d("StartRoute", "Conexão com internet: $isConnected")
+            
+            if (!isConnected) {
+                Toast.makeText(this, "Sem conexão com internet. O mapa pode não carregar completamente.", Toast.LENGTH_LONG).show()
+            }
+        } catch (e: SecurityException) {
+            Log.w("StartRoute", "Não foi possível verificar conexão (sem permissão ACCESS_NETWORK_STATE): ${e.message}")
+            // Continua normalmente mesmo sem poder verificar a conexão
+        } catch (e: Exception) {
+            Log.w("StartRoute", "Erro ao verificar conexão: ${e.message}")
+        }
         
         // Configura cache de tiles
         val osmdroidBasePath = File(getExternalFilesDir(null), "osmdroid")
@@ -200,13 +234,69 @@ class StartRoute : AppCompatActivity() {
             osmdroidTileCache.mkdirs()
         }
         Configuration.getInstance().osmdroidTileCache = osmdroidTileCache
+        
+        // Configura threads de download para melhor performance
+        Configuration.getInstance().setTileDownloadThreads(8)
+        Configuration.getInstance().setTileDownloadMaxQueueSize(200)
+        
+        // Configura timeout para download de tiles
+        Configuration.getInstance().setTileFileSystemCacheMaxBytes(50L * 1024 * 1024) // 50MB
+        
+        Log.d("StartRoute", "OSMDroid configurado - BasePath: $osmdroidBasePath, Cache: $osmdroidTileCache")
 
-        // Inicializa mapa (OSMDroid)
+        // Inicializa mapa (OSMDroid) - DEVE ser feito DEPOIS da configuração
         mapView = findViewById(R.id.mapView)
-        mapView.setTileSource(TileSourceFactory.MAPNIK)
+        
+        // Configura tile source customizado
+        // Tenta usar OpenStreetMap primeiro, se falhar tenta CartoDB
+        try {
+            val customTileSource = CustomTileSource.createOpenStreetMapHttps()
+            mapView.setTileSource(customTileSource)
+            Log.d("StartRoute", "Tile source configurado: OpenStreetMap HTTPS (Custom)")
+        } catch (e: Exception) {
+            Log.e("StartRoute", "Erro ao configurar OpenStreetMap: ${e.message}", e)
+            // Tenta usar CartoDB como alternativa
+            try {
+                val cartoDBSource = CustomTileSource.createCartoDB()
+                mapView.setTileSource(cartoDBSource)
+                Log.d("StartRoute", "Tile source configurado: CartoDB (alternativa)")
+            } catch (e2: Exception) {
+                Log.e("StartRoute", "Erro ao configurar CartoDB: ${e2.message}", e2)
+                // Fallback para tile source padrão
+                try {
+                    mapView.setTileSource(TileSourceFactory.MAPNIK)
+                    Log.d("StartRoute", "Usando tile source padrão: MAPNIK")
+                } catch (e3: Exception) {
+                    Log.e("StartRoute", "Erro ao configurar MAPNIK: ${e3.message}", e3)
+                    try {
+                        mapView.setTileSource(TileSourceFactory.DEFAULT_TILE_SOURCE)
+                        Log.d("StartRoute", "Usando tile source padrão do sistema")
+                    } catch (e4: Exception) {
+                        Log.e("StartRoute", "Erro ao configurar tile source padrão: ${e4.message}", e4)
+                    }
+                }
+            }
+        }
+        
         mapView.setMultiTouchControls(true)
         mapView.controller.setZoom(15.0)
         mapView.setUseDataConnection(true)
+        
+        // Habilita zoom controls (os controles de zoom já estão habilitados por padrão)
+        // mapView.zoomController.setVisibility(View.VISIBLE) // Opcional: controlar visibilidade
+        
+        // Configurações adicionais para garantir download de tiles
+        mapView.isHorizontalMapRepetitionEnabled = true
+        mapView.isVerticalMapRepetitionEnabled = false
+        mapView.isTilesScaledToDpi = true
+        
+        // Força atualização do mapa após um pequeno delay para garantir que tudo está configurado
+        mapView.post {
+            mapView.invalidate()
+            Log.d("StartRoute", "Mapa invalidado após configuração")
+        }
+        
+        Log.d("StartRoute", "Mapa inicializado - Zoom: ${mapView.zoomLevelDouble}, DataConnection: ${mapView.useDataConnection()}, TileSource: ${mapView.tileProvider.tileSource.name()}")
         
         // Configura overlay de localização
         if (checkLocationPermissions() && gpsMonitor.isGpsEnabled()) {
@@ -277,6 +367,12 @@ class StartRoute : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         mapView.onResume()
+        
+        // Força atualização do mapa ao retornar
+        mapView.post {
+            mapView.invalidate()
+            Log.d("StartRoute", "Mapa invalidado no onResume")
+        }
         
         // Verifica GPS ao retornar
         if (!gpsMonitor.isGpsEnabled()) {
