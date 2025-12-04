@@ -41,6 +41,12 @@ interface ApiService {
         @Query("truckId") truckId: Long? = null
     ): Response<List<RouteEntity>>
 
+    /**
+     * Busca uma rota específica com seus pontos de coleta
+     */
+    @GET("routes/{id}")
+    suspend fun getRouteWithPoints(@Path("id") routeId: Long): Response<Map<String, Any>>
+
     // ========== EXECUTIONS ==========
     /**
      * Inicia uma nova execução de coleta

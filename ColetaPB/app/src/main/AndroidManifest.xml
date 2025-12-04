@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
 
     <application
         android:allowBackup="true"
@@ -18,7 +20,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.ColetaPB"
         android:usesCleartextTraffic="true"
-        tools:targetApi="31">
+        android:networkSecurityConfig="@xml/network_security_config"
+        tools:targetApi="31"
+        tools:replace="android:allowBackup">
 
         <!-- Tela inicial -->
         <activity
@@ -47,6 +51,12 @@
             android:name=".StartRoute"
             android:exported="false"
             android:parentActivityName=".RouteList" />
+
+        <!-- Lista de pontos da rota -->
+        <activity
+            android:name=".RoutePointsListActivity"
+            android:exported="false"
+            android:parentActivityName=".StartRoute" />
 
         <!-- Serviço de rastreamento GPS -->
         <service

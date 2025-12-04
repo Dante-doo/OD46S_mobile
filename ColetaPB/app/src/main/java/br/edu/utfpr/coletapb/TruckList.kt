@@ -21,6 +21,7 @@ import br.edu.utfpr.coletapb.data.local.SharedPreferencesHelper
 import br.edu.utfpr.coletapb.data.remote.RetrofitClient
 import br.edu.utfpr.coletapb.ui.assignment.AssignmentViewModel
 import br.edu.utfpr.coletapb.ui.assignment.AssignmentUiState
+import br.edu.utfpr.coletapb.utils.GpsMonitor
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -37,6 +38,7 @@ class TruckList : AppCompatActivity() {
     }
 
     private lateinit var prefsHelper: SharedPreferencesHelper
+    private lateinit var gpsMonitor: GpsMonitor
     private var isInitialized = false
     private var isResumingFromOtherActivity = false
     
@@ -48,6 +50,22 @@ class TruckList : AppCompatActivity() {
         RetrofitClient.init(this)
         
         prefsHelper = SharedPreferencesHelper(this)
+        gpsMonitor = GpsMonitor(this)
+        
+        // Verifica GPS ao abrir a tela - usando post para garantir que a Activity está totalmente criada
+        window.decorView.post {
+            gpsMonitor.checkAndRequestGps(
+                onGpsEnabled = {
+                    // GPS está ativo, pode continuar
+                    Log.d("TruckList", "GPS está habilitado, continuando...")
+                },
+                onGpsDisabled = {
+                    // GPS não ativado, fecha o app
+                    Log.d("TruckList", "GPS não ativado, fechando app")
+                    finish()
+                }
+            )
+        }
         
         // Verifica se está logado apenas se não for uma recriação da Activity
         // Se savedInstanceState != null, significa que a Activity foi recriada pelo sistema
@@ -99,13 +117,18 @@ class TruckList : AppCompatActivity() {
         listView.setOnItemClickListener { _, _, position, _ ->
             val assignment = adapter?.getItem(position) ?: return@setOnItemClickListener
 
-            // Navega para a lista de rotas com os dados da escala
-            val intent = Intent(this, RouteList::class.java).apply {
+            // Navega diretamente para a tela de início de rota (StartRoute)
+            // para que o motorista veja imediatamente a rota a ser executada.
+            val intent = Intent(this, StartRoute::class.java).apply {
                 putExtra("assignment_id", assignment.id)
-                putExtra("truck_id", assignment.vehicleId)
-                putExtra("truck_plate", assignment.vehiclePlate)
                 putExtra("route_id", assignment.routeId)
                 putExtra("route_name", assignment.routeName)
+                // Não temos uma descrição detalhada da rota aqui,
+                // então enviamos uma string padrão amigável.
+                putExtra(
+                    "route_info",
+                    assignment.routeName ?: "Rota atribuída ao veículo ${assignment.vehiclePlate ?: ""}"
+                )
             }
             startActivity(intent)
         }
@@ -137,6 +160,12 @@ class TruckList : AppCompatActivity() {
                 logout()
             }
         })
+        
+        // Inicia monitoramento contínuo do GPS
+        gpsMonitor.startMonitoring {
+            // GPS foi desativado enquanto o app está aberto
+            gpsMonitor.showGpsDisabledWarning()
+        }
     }
     
     override fun onPause() {
@@ -147,6 +176,12 @@ class TruckList : AppCompatActivity() {
     
     override fun onResume() {
         super.onResume()
+        
+        // Verifica GPS ao retornar
+        if (!gpsMonitor.isGpsEnabled()) {
+            gpsMonitor.showGpsDisabledWarning()
+            return
+        }
         
         // Se está voltando de outra Activity (RouteList, etc), não verifica login
         if (isResumingFromOtherActivity) {
@@ -171,6 +206,11 @@ class TruckList : AppCompatActivity() {
                 return
             }
         }
+    }
+    
+    override fun onDestroy() {
+        super.onDestroy()
+        gpsMonitor.stopMonitoring()
     }
 
     private fun observeAssignmentState() {

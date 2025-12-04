@@ -148,27 +148,45 @@ class ExecutionRepository(private val prefsHelper: SharedPreferencesHelper) {
             
             if (response.isSuccessful && response.body() != null) {
                 val body = response.body()!!
+                Log.d("ExecutionRepository", "Resposta my-current execution: $body")
+
                 val data = body["data"] as? Map<String, Any>?
+
+                // Backend retorna { data: { execution: { ... } } }
+                // ou, em alguns casos, { data: { ... } }
+                val execData = (data?.get("execution") as? Map<String, Any>) ?: data
                 
-                if (data != null) {
+                if (execData != null) {
                     val execution = try {
+                        Log.d("ExecutionRepository", "Mapeando execution atual: $execData")
                         Execution(
-                            id = (data["id"] as? Number)?.toLong() ?: 0L,
-                            assignmentId = (data["assignmentId"] as? Number)?.toLong() ?: 0L,
-                            routeId = ((data["route"] as? Map<*, *>)?.get("id") as? Number)?.toLong() ?: 0L,
-                            routeName = (data["route"] as? Map<*, *>)?.get("name") as? String,
-                            driverId = ((data["driver"] as? Map<*, *>)?.get("id") as? Number)?.toLong() ?: 0L,
-                            vehicleId = ((data["vehicle"] as? Map<*, *>)?.get("id") as? Number)?.toLong() ?: 0L,
-                            status = data["status"] as? String ?: "UNKNOWN",
-                            startTime = data["startTime"] as? String,
-                            endTime = data["endTime"] as? String,
-                            startLat = (data["startLat"] as? Number)?.toDouble(),
-                            startLng = (data["startLng"] as? Number)?.toDouble(),
-                            endLat = (data["endLat"] as? Number)?.toDouble(),
-                            endLng = (data["endLng"] as? Number)?.toDouble()
+                            id = (execData["id"] as? Number)?.toLong() ?: 0L,
+                            assignmentId = (execData["assignmentId"] as? Number)?.toLong()
+                                // Fallback: tenta pegar do objeto assignment.inner.id
+                                ?: ((execData["assignment"] as? Map<*, *>)?.get("id") as? Number)?.toLong()
+                                ?: 0L,
+                            routeId = ((execData["route"] as? Map<*, *>)?.get("id") as? Number)?.toLong()
+                                // Fallback: rota dentro de assignment
+                                ?: (((execData["assignment"] as? Map<*, *>)?.get("route") as? Map<*, *>)?.get("id") as? Number)?.toLong()
+                                ?: 0L,
+                            routeName = (execData["route"] as? Map<*, *>)?.get("name") as? String
+                                ?: (((execData["assignment"] as? Map<*, *>)?.get("route") as? Map<*, *>)?.get("name") as? String),
+                            driverId = ((execData["driver"] as? Map<*, *>)?.get("id") as? Number)?.toLong()
+                                ?: (((execData["assignment"] as? Map<*, *>)?.get("driver") as? Map<*, *>)?.get("id") as? Number)?.toLong()
+                                ?: 0L,
+                            vehicleId = ((execData["vehicle"] as? Map<*, *>)?.get("id") as? Number)?.toLong()
+                                ?: (((execData["assignment"] as? Map<*, *>)?.get("vehicle") as? Map<*, *>)?.get("id") as? Number)?.toLong()
+                                ?: 0L,
+                            status = execData["status"] as? String ?: "UNKNOWN",
+                            startTime = execData["startTime"] as? String,
+                            endTime = execData["endTime"] as? String,
+                            startLat = (execData["startLat"] as? Number)?.toDouble(),
+                            startLng = (execData["startLng"] as? Number)?.toDouble(),
+                            endLat = (execData["endLat"] as? Number)?.toDouble(),
+                            endLng = (execData["endLng"] as? Number)?.toDouble()
                         )
                     } catch (e: Exception) {
-                        Log.e("ExecutionRepository", "Erro ao mapear execution atual: ${e.message}")
+                        Log.e("ExecutionRepository", "Erro ao mapear execution atual: ${e.message}", e)
                         null
                     }
                     Result.success(execution)

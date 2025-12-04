@@ -12,6 +12,7 @@ import br.edu.utfpr.coletapb.config.ApiConfig
 import br.edu.utfpr.coletapb.data.local.SharedPreferencesHelper
 import br.edu.utfpr.coletapb.data.model.LoginRequest
 import br.edu.utfpr.coletapb.data.remote.RetrofitClient
+import br.edu.utfpr.coletapb.utils.GpsMonitor
 import com.google.android.material.textfield.TextInputEditText
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
@@ -19,6 +20,7 @@ import retrofit2.HttpException
 class LoginPage : AppCompatActivity() {
     
     private lateinit var prefsHelper: SharedPreferencesHelper
+    private lateinit var gpsMonitor: GpsMonitor
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,6 +30,22 @@ class LoginPage : AppCompatActivity() {
         RetrofitClient.init(this)
         
         prefsHelper = SharedPreferencesHelper(this)
+        gpsMonitor = GpsMonitor(this)
+        
+        // Verifica GPS ao abrir o app - usando post para garantir que a Activity está totalmente criada
+        window.decorView.post {
+            gpsMonitor.checkAndRequestGps(
+                onGpsEnabled = {
+                    // GPS está ativo, pode continuar
+                    Log.d("LoginPage", "GPS está habilitado, continuando...")
+                },
+                onGpsDisabled = {
+                    // Usuário escolheu sair, app será fechado
+                    Log.d("LoginPage", "Usuário escolheu sair, fechando app")
+                    finish()
+                }
+            )
+        }
         
         // Não redireciona automaticamente - sempre mostra a tela de login
         // O usuário pode fazer logout se necessário
@@ -76,9 +94,22 @@ class LoginPage : AppCompatActivity() {
                         
                         Log.d("LoginPage", "Login bem-sucedido: ${loginResponse.email} (${loginResponse.type})")
                         Log.d("LoginPage", "UserId: ${loginResponse.userId}, DriverId: ${loginResponse.driverId}, AdminId: ${loginResponse.adminId}")
-                        Toast.makeText(this@LoginPage, "Bem-vindo, ${loginResponse.name}!", Toast.LENGTH_SHORT).show()
                         
-                        navigateToTruckList()
+                        // Verifica GPS antes de navegar
+                        if (gpsMonitor.isGpsEnabled()) {
+                            Toast.makeText(this@LoginPage, "Bem-vindo, ${loginResponse.name}!", Toast.LENGTH_SHORT).show()
+                            navigateToTruckList()
+                        } else {
+                            gpsMonitor.checkAndRequestGps(
+                                onGpsEnabled = {
+                                    Toast.makeText(this@LoginPage, "Bem-vindo, ${loginResponse.name}!", Toast.LENGTH_SHORT).show()
+                                    navigateToTruckList()
+                                },
+                                onGpsDisabled = {
+                                    // GPS não ativado, não navega
+                                }
+                            )
+                        }
                     } else {
                         val errorBody = response.errorBody()?.string() ?: "Erro desconhecido"
                         Log.e("LoginPage", "Erro no login: ${response.code()} - $errorBody")

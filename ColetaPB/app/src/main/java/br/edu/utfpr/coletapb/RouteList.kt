@@ -14,11 +14,13 @@ import br.edu.utfpr.coletapb.adapter.ItemRoute
 import br.edu.utfpr.coletapb.data.AppDatabase
 import br.edu.utfpr.coletapb.data.RouteDao
 import br.edu.utfpr.coletapb.data.RouteEntity
+import br.edu.utfpr.coletapb.data.local.SharedPreferencesHelper
 import br.edu.utfpr.coletapb.data.remote.RetrofitClient
 import br.edu.utfpr.coletapb.data.repository.RouteRepository
 import br.edu.utfpr.coletapb.ui.route.RouteUiState
 import br.edu.utfpr.coletapb.ui.route.RouteViewModel
 import br.edu.utfpr.coletapb.ui.route.RouteViewModelFactory
+import br.edu.utfpr.coletapb.utils.GpsMonitor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -35,11 +37,9 @@ class RouteList : AppCompatActivity() {
     private var driverId: Long = 0L // ID do motorista logado
 
     // --- INICIALIZAÇÃO DO VIEWMODEL ---
-    private val viewModel: RouteViewModel by viewModels {
-        RouteViewModelFactory(
-            RouteRepository(RetrofitClient.apiService)
-        )
-    }
+    private lateinit var prefsHelper: SharedPreferencesHelper
+    private lateinit var viewModel: RouteViewModel
+    private lateinit var gpsMonitor: GpsMonitor
     // ------------------------------------
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,8 +47,32 @@ class RouteList : AppCompatActivity() {
         setContentView(R.layout.activity_route_list)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
+        // Inicializa prefsHelper primeiro
+        prefsHelper = SharedPreferencesHelper(this)
+        gpsMonitor = GpsMonitor(this)
+        
+        // Verifica GPS ao abrir a tela - usando post para garantir que a Activity está totalmente criada
+        window.decorView.post {
+            gpsMonitor.checkAndRequestGps(
+                onGpsEnabled = {
+                    // GPS está ativo, pode continuar
+                    Log.d("RouteList", "GPS está habilitado, continuando...")
+                },
+                onGpsDisabled = {
+                    // GPS não ativado, volta para a tela anterior
+                    Log.d("RouteList", "GPS não ativado, voltando para tela anterior")
+                    finish()
+                }
+            )
+        }
+        
+        // Inicializa ViewModel após prefsHelper
+        viewModel = androidx.lifecycle.ViewModelProvider(
+            this,
+            RouteViewModelFactory(RouteRepository(prefsHelper))
+        )[RouteViewModel::class.java]
+
         // Verifica se está logado
-        val prefsHelper = br.edu.utfpr.coletapb.data.local.SharedPreferencesHelper(this)
         val hasToken = prefsHelper.getToken() != null
         
         if (!hasToken) {
@@ -125,6 +149,26 @@ class RouteList : AppCompatActivity() {
             // 3. Inicie a Activity
             startActivity(intent)
         }
+        
+        // Inicia monitoramento contínuo do GPS
+        gpsMonitor.startMonitoring {
+            // GPS foi desativado enquanto o app está aberto
+            gpsMonitor.showGpsDisabledWarning()
+        }
+    }
+    
+    override fun onResume() {
+        super.onResume()
+        
+        // Verifica GPS ao retornar
+        if (!gpsMonitor.isGpsEnabled()) {
+            gpsMonitor.showGpsDisabledWarning()
+        }
+    }
+    
+    override fun onDestroy() {
+        super.onDestroy()
+        gpsMonitor.stopMonitoring()
     }
 
     /**

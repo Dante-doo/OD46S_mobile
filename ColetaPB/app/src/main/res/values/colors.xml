@@ -39,4 +39,9 @@
     <!-- Cores legadas (mantidas para compatibilidade) -->
     <color name="blue">#2148C0</color>
     <color name="light_blue">#3498DB</color>
+    
+    <!-- Cores para pontos de coleta -->
+    <color name="green_500">#4CAF50</color>
+    <color name="orange_500">#FF9800</color>
+    <color name="red_500">#F44336</color>
 </resources>

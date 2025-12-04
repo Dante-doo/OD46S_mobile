@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.ksp)
     //alias(libs.plugins.kotlin.android)
     id("org.jetbrains.kotlin.android")
+    id("kotlin-parcelize")
 }
 
 android {
@@ -67,11 +68,24 @@ dependencies {
     
     // SwipeRefreshLayout
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
+    
+    // RecyclerView
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
 
     // Room (Banco de dados local)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
     implementation("com.google.android.gms:play-services-location:21.3.0")
+
+    // OSMDroid (OpenStreetMap - Gratuito)
+    implementation("org.osmdroid:osmdroid-android:6.1.18") {
+        exclude(group = "com.j256.ormlite", module = "ormlite-core")
+        exclude(group = "com.j256.ormlite", module = "ormlite-android")
+    }
+    implementation("org.osmdroid:osmdroid-wms:6.1.18")
+    // Removendo dependências que causam conflito com ORMLite
+    // implementation("org.osmdroid:osmdroid-mapsforge:6.1.18")
+    // implementation("org.osmdroid:osmdroid-geopackage:6.1.18")
 
 }
