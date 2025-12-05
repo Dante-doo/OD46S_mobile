@@ -42,11 +42,13 @@
                 android:textStyle="bold" />
 
             <LinearLayout
+                android:id="@+id/llRouteStatus"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:layout_marginTop="4dp"
-                android:gravity="center_vertical">
+                android:gravity="center_vertical"
+                android:visibility="gone">
 
                 <TextView
                     android:id="@+id/tvStartTime"
@@ -74,7 +76,7 @@
         </LinearLayout>
     </com.google.android.material.appbar.AppBarLayout>
 
-    <!-- Mapa (ocupa o espaço restante) -->
+    <!-- Mapa ocupando todo o fundo -->
     <FrameLayout
         android:id="@+id/mapContainer"
         android:layout_width="match_parent"
@@ -99,134 +101,239 @@
             app:backgroundTint="@color/primary_blue" />
     </FrameLayout>
 
-    <!-- Bottom Sheet com informações do próximo ponto -->
-    <LinearLayout
+    <!-- Bottom Sheet com dois snap points (colapsado ~30% e expandido até abaixo do header) -->
+    <!-- Filho direto do CoordinatorLayout para permitir arrasto vertical -->
+    <!-- match_parent para ocupar toda a tela quando expandido, escondendo o mapa -->
+    <androidx.core.widget.NestedScrollView
         android:id="@+id/bottomSheet"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:background="@color/card_background"
-        android:elevation="8dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="bottom"
+        android:fillViewport="true"
+        android:background="@android:color/transparent"
+        android:clipToPadding="false"
         app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
-        app:layout_anchor="@id/mapContainer"
-        app:layout_anchorGravity="bottom"
-        app:behavior_peekHeight="200dp"
+        app:behavior_peekHeight="250dp"
         app:behavior_hideable="false"
-        app:behavior_skipCollapsed="false">
+        app:behavior_skipCollapsed="false"
+        app:behavior_fitToContents="false"
+        app:elevation="12dp">
 
-        <!-- Handle para arrastar -->
-        <View
-            android:layout_width="40dp"
-            android:layout_height="4dp"
-            android:layout_gravity="center_horizontal"
-            android:layout_marginTop="8dp"
-            android:background="@drawable/bottom_sheet_handle" />
-
-        <!-- Conteúdo do próximo ponto -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:orientation="vertical"
-            android:padding="16dp">
+            android:background="@drawable/bottom_sheet_background"
+            android:paddingTop="12dp"
+            android:paddingBottom="24dp">
 
-            <TextView
-                android:id="@+id/tvNextPointTitle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Ponto 3 – Rua das Flores, 120"
-                android:textColor="@color/text_primary"
-                android:textSize="18sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/tvNextPointInfo"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+            <!-- Drag Handle (sempre visível no topo) -->
+            <View
+                android:id="@+id/dragHandle"
+                android:layout_width="40dp"
+                android:layout_height="6dp"
+                android:layout_gravity="center_horizontal"
                 android:layout_marginTop="4dp"
-                android:text="Orgânicos • Comercial • a 350 m • ~2 min"
-                android:textColor="@color/text_secondary"
-                android:textSize="14sp" />
+                android:layout_marginBottom="12dp"
+                android:background="@drawable/bottom_sheet_handle"
+                android:clickable="false"
+                android:focusable="false" />
 
-            <!-- Botões de ação -->
+            <!-- Conteúdo do Bottom Sheet -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:layout_marginTop="16dp">
+                android:padding="16dp">
 
-                <!-- Botão primário: Registrar coleta -->
-                <Button
-                    android:id="@+id/btRegisterCollection"
-                    android:layout_width="match_parent"
-                    android:layout_height="56dp"
-                    android:text="Registrar coleta"
-                    android:textAllCaps="false"
-                    android:textSize="16sp"
-                    android:backgroundTint="@color/primary_blue"
-                    android:textColor="@color/white" />
-
-                <!-- Botão secundário: Registrar problema -->
-                <Button
-                    android:id="@+id/btRegisterProblem"
-                    android:layout_width="match_parent"
-                    android:layout_height="56dp"
-                    android:layout_marginTop="8dp"
-                    android:text="Registrar problema"
-                    android:textAllCaps="false"
-                    android:textSize="16sp"
-                    android:backgroundTint="@android:color/transparent"
-                    android:textColor="@color/primary_blue"
-                    style="@style/Widget.Material3.Button.OutlinedButton" />
-
-                <!-- Links na parte inferior -->
+                <!-- Título: Próximos pontos -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:layout_marginTop="16dp"
                     android:gravity="center_vertical">
 
                     <TextView
-                        android:id="@+id/tvViewRouteList"
+                        android:id="@+id/tvNextPointsTitle"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="Ver lista da rota"
-                        android:textColor="@color/primary_blue"
-                        android:textSize="14sp"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:padding="8dp" />
+                        android:text="Próximos pontos"
+                        android:textColor="@color/text_primary"
+                        android:textSize="20sp"
+                        android:textStyle="bold" />
 
                     <TextView
-                        android:id="@+id/tvCancelRoute"
+                        android:id="@+id/tvPointsProgress"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:text="(3/18)"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="16sp"
+                        android:visibility="gone" />
+                </LinearLayout>
+
+                <!-- Subtítulo: Status da rota (quando não iniciada) -->
+                <TextView
+                    android:id="@+id/tvRouteSubtitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Você ainda não iniciou a rota"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp" />
+
+                <!-- Chip de modo (visível apenas quando iniciada) -->
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipMode"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Modo: todas as ruas"
+                    android:visibility="gone"
+                    style="@style/Widget.Material3.Chip.Filter" />
+
+                <!-- Lista de próximos pontos (RecyclerView) -->
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/rvNextPoints"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:nestedScrollingEnabled="false"
+                    tools:listitem="@layout/item_next_point" />
+
+                <!-- Link para ver registros (visível apenas quando iniciada) -->
+                <TextView
+                    android:id="@+id/tvViewRouteRecords"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="Ver registros da rota →"
+                    android:textColor="@color/primary_blue"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:padding="12dp"
+                    android:background="?attr/selectableItemBackground"
+                    android:gravity="center_vertical"
+                    android:visibility="gone" />
+
+                <!-- Botões de ação (visíveis apenas quando iniciada E expandido) -->
+                <!-- Grid consistente: 2 botões por linha, mesma largura e altura -->
+                <LinearLayout
+                    android:id="@+id/llActionButtons"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="24dp"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <!-- Linha 1: Registrar coleta | Registrar problema -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:weightSum="2">
+
+                        <Button
+                            android:id="@+id/btRegisterCollection"
+                            android:layout_width="0dp"
+                            android:layout_height="56dp"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="8dp"
+                            android:text="Registrar coleta"
+                            android:textAllCaps="false"
+                            android:textSize="16sp"
+                            android:drawableStart="@android:drawable/checkbox_on_background"
+                            android:drawablePadding="8dp"
+                            android:backgroundTint="@color/primary_blue"
+                            android:textColor="@color/white" />
+
+                        <Button
+                            android:id="@+id/btRegisterProblem"
+                            android:layout_width="0dp"
+                            android:layout_height="56dp"
+                            android:layout_weight="1"
+                            android:layout_marginStart="8dp"
+                            android:text="Registrar problema"
+                            android:textAllCaps="false"
+                            android:textSize="16sp"
+                            android:drawableStart="@android:drawable/ic_dialog_alert"
+                            android:drawablePadding="8dp"
+                            android:backgroundTint="@android:color/transparent"
+                            android:textColor="@color/error"
+                            style="@style/Widget.Material3.Button.OutlinedButton" />
+                    </LinearLayout>
+
+                    <!-- Linha 2: Ver registros | Encerrar rota -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="horizontal"
+                        android:weightSum="2">
+
+                        <Button
+                            android:id="@+id/btViewRouteRecords"
+                            android:layout_width="0dp"
+                            android:layout_height="56dp"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="8dp"
+                            android:text="Ver registros"
+                            android:textAllCaps="false"
+                            android:textSize="16sp"
+                            android:backgroundTint="@android:color/transparent"
+                            android:textColor="@color/primary_blue"
+                            style="@style/Widget.Material3.Button.OutlinedButton" />
+
+                        <Button
+                            android:id="@+id/btFinishRoute"
+                            android:layout_width="0dp"
+                            android:layout_height="56dp"
+                            android:layout_weight="1"
+                            android:layout_marginStart="8dp"
+                            android:text="Encerrar rota"
+                            android:textAllCaps="false"
+                            android:textSize="16sp"
+                            android:backgroundTint="@color/primary_blue"
+                            android:textColor="@color/white" />
+                    </LinearLayout>
+
+                    <!-- Linha 3: Cancelar rota (centralizado, largura total) -->
+                    <Button
+                        android:id="@+id/btCancelRoute"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:layout_marginTop="12dp"
                         android:text="Cancelar rota"
+                        android:textAllCaps="false"
+                        android:textSize="16sp"
+                        android:backgroundTint="@android:color/transparent"
                         android:textColor="@color/error"
-                        android:textSize="14sp"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:padding="8dp" />
+                        style="@style/Widget.Material3.Button.OutlinedButton" />
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>
-    </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
 
-    <!-- Botão INICIAR (visível apenas quando rota não iniciada) -->
+    <!-- Botão INICIAR ROTA (fixo no rodapé, sobreposto ao bottom sheet, visível apenas quando não iniciada) -->
     <Button
         android:id="@+id/btStart"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_margin="16dp"
-        android:text="INICIAR ROTA"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="16dp"
+        android:text="Iniciar rota"
         android:textAllCaps="false"
-        android:textSize="20sp"
+        android:textSize="18sp"
+        android:textStyle="bold"
         android:backgroundTint="@color/primary_blue"
         android:textColor="@color/white"
-        android:visibility="gone"
-        app:layout_anchor="@id/mapContainer"
-        app:layout_anchorGravity="center" />
+        android:elevation="16dp"
+        app:layout_anchor="@id/bottomSheet"
+        app:layout_anchorGravity="bottom|center_horizontal"
+        android:visibility="visible" />
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
-

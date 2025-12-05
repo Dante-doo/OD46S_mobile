@@ -1,12 +1,20 @@
 package br.edu.utfpr.coletapb.service
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.location.Location
+import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
+import br.edu.utfpr.coletapb.R
+import br.edu.utfpr.coletapb.StartRoute
 import br.edu.utfpr.coletapb.data.AppDatabase
 import br.edu.utfpr.coletapb.data.dao.ExecutionDao
 import br.edu.utfpr.coletapb.data.dao.GpsDao
@@ -33,6 +41,10 @@ class GpsTrackingService : LifecycleService() {
         const val ACTION_STOP_TRACKING = "br.edu.utfpr.coletapb.STOP_TRACKING"
         const val EXTRA_EXECUTION_ID = "execution_local_id"
         
+        // ID da notificação (deve ser único e constante)
+        private const val NOTIFICATION_ID = 1001
+        private const val CHANNEL_ID = "gps_tracking_channel"
+        
         // Intervalos de atualização
         private const val UPDATE_INTERVAL_MS = 10000L // 10 segundos
         private const val FASTEST_UPDATE_INTERVAL_MS = 5000L // 5 segundos
@@ -40,6 +52,8 @@ class GpsTrackingService : LifecycleService() {
     
     override fun onCreate() {
         super.onCreate()
+        
+        createNotificationChannel()
         
         val db = AppDatabase.getDatabase(this)
         executionDao = db.executionDao()
@@ -64,11 +78,18 @@ class GpsTrackingService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         
+        // IMPORTANTE: Chamar startForeground() ANTES de qualquer operação demorada
+        // Isso deve ser feito dentro de 5 segundos após startForegroundService()
+        startForeground(NOTIFICATION_ID, createNotification())
+        
         when (intent?.action) {
             ACTION_START_TRACKING -> {
                 val execId = intent.getLongExtra(EXTRA_EXECUTION_ID, 0L)
                 if (execId > 0) {
                     startTracking(execId)
+                } else {
+                    // Se não tem execId válido, para o serviço
+                    stopSelf()
                 }
             }
             ACTION_STOP_TRACKING -> {
@@ -77,6 +98,42 @@ class GpsTrackingService : LifecycleService() {
         }
         
         return START_STICKY
+    }
+    
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Rastreamento GPS",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Notificação para rastreamento GPS em segundo plano"
+                setShowBadge(false)
+            }
+            
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+    
+    private fun createNotification(): Notification {
+        val intent = Intent(this, StartRoute::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Rastreamento GPS Ativo")
+            .setContentText("Coletando localização em segundo plano")
+            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .build()
     }
     
     private fun startTracking(execId: Long) {
@@ -109,6 +166,9 @@ class GpsTrackingService : LifecycleService() {
         fusedLocationClient.removeLocationUpdates(locationCallback)
         isTracking = false
         Log.d(TAG, "Rastreamento GPS parado")
+        
+        // Remove a notificação antes de parar o serviço
+        stopForeground(true)
         stopSelf()
     }
     

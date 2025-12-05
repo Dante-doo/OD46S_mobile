@@ -14,6 +14,7 @@ import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
 import android.widget.Button
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -61,14 +62,26 @@ class StartRoute : AppCompatActivity() {
     private lateinit var btStart: Button
     private lateinit var btRegisterCollection: Button
     private lateinit var btRegisterProblem: Button
+    private lateinit var btCancelRoute: Button
+    private lateinit var btFinishRoute: Button
+    private lateinit var btViewRouteRecords: Button
     private lateinit var tvRouteName: TextView
     private lateinit var tvStartTime: TextView
     private lateinit var tvStatus: TextView
-    private lateinit var tvNextPointTitle: TextView
-    private lateinit var tvNextPointInfo: TextView
-    private lateinit var tvViewRouteList: TextView
-    private lateinit var tvCancelRoute: TextView
+    private lateinit var tvNextPointsTitle: TextView
+    private lateinit var tvPointsProgress: TextView
+    private lateinit var tvRouteSubtitle: TextView
+    private lateinit var chipMode: com.google.android.material.chip.Chip
+    private lateinit var rvNextPoints: androidx.recyclerview.widget.RecyclerView
+    private lateinit var tvViewRouteRecords: TextView
+    private lateinit var llRouteStatus: LinearLayout
+    private lateinit var llActionButtons: LinearLayout
+    private lateinit var bottomSheet: androidx.core.widget.NestedScrollView
+    private lateinit var bottomSheetBehavior: com.google.android.material.bottomsheet.BottomSheetBehavior<*>
     private lateinit var fabCenterLocation: com.google.android.material.floatingactionbutton.FloatingActionButton
+    
+    // Adapter para lista de próximos pontos
+    private lateinit var nextPointAdapter: br.edu.utfpr.coletapb.adapter.NextPointAdapter
 
     // Map (OSMDroid)
     private lateinit var mapView: MapView
@@ -137,14 +150,96 @@ class StartRoute : AppCompatActivity() {
         tvRouteName = findViewById(R.id.tvRouteName)
         tvStartTime = findViewById(R.id.tvStartTime)
         tvStatus = findViewById(R.id.tvStatus)
-        tvNextPointTitle = findViewById(R.id.tvNextPointTitle)
-        tvNextPointInfo = findViewById(R.id.tvNextPointInfo)
+        tvNextPointsTitle = findViewById(R.id.tvNextPointsTitle)
+        tvPointsProgress = findViewById(R.id.tvPointsProgress)
+        tvRouteSubtitle = findViewById(R.id.tvRouteSubtitle)
+        chipMode = findViewById(R.id.chipMode)
+        rvNextPoints = findViewById(R.id.rvNextPoints)
+        tvViewRouteRecords = findViewById(R.id.tvViewRouteRecords)
+        llRouteStatus = findViewById(R.id.llRouteStatus)
+        llActionButtons = findViewById(R.id.llActionButtons)
+        bottomSheet = findViewById(R.id.bottomSheet)
         btStart = findViewById(R.id.btStart)
         btRegisterCollection = findViewById(R.id.btRegisterCollection)
         btRegisterProblem = findViewById(R.id.btRegisterProblem)
-        tvViewRouteList = findViewById(R.id.tvViewRouteList)
-        tvCancelRoute = findViewById(R.id.tvCancelRoute)
+        btCancelRoute = findViewById(R.id.btCancelRoute)
+        btFinishRoute = findViewById(R.id.btFinishRoute)
+        btViewRouteRecords = findViewById(R.id.btViewRouteRecords)
         fabCenterLocation = findViewById(R.id.fabCenterLocation)
+
+        // Configura BottomSheetBehavior usando técnicas corretas de mobile:
+        // - Estado inicial: COLLAPSED (mostra mapa)
+        // - Arrastar para cima: expande até o header
+        // - Arrastar para baixo: volta ao estado inicial
+        bottomSheetBehavior = com.google.android.material.bottomsheet.BottomSheetBehavior.from(bottomSheet)
+        val screenHeight = resources.displayMetrics.heightPixels
+        
+        // Colapsado: 25% da tela (peek height - altura visível quando colapsado)
+        val collapsedHeight = (screenHeight * 0.25).toInt()
+        
+        // Configura o peek height (altura quando colapsado)
+        bottomSheetBehavior.peekHeight = collapsedHeight
+        bottomSheetBehavior.isHideable = false
+        bottomSheetBehavior.skipCollapsed = false
+        bottomSheetBehavior.isFitToContents = false // Permite controlar a altura máxima
+        bottomSheetBehavior.isDraggable = true // Garante que é arrastável
+        
+        // Aguarda o layout ser medido para calcular o expandedOffset
+        bottomSheet.viewTreeObserver.addOnGlobalLayoutListener(object : android.view.ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                bottomSheet.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                
+                // Calcula o offset expandido: distância do topo até onde o bottom sheet deve parar
+                val appBarLayout = findViewById<com.google.android.material.appbar.AppBarLayout>(R.id.appBarLayout)
+                val appBarHeight = appBarLayout.height
+                // Offset expandido = altura do header + pequeno espaço
+                val expandedOffset = appBarHeight + (16 * resources.displayMetrics.density).toInt()
+                
+                // Define o offset para parar abaixo do header quando expandido
+                bottomSheetBehavior.expandedOffset = expandedOffset
+                
+                // Estado inicial COLLAPSED - garante que o mapa seja visível
+                bottomSheetBehavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED
+                
+                Log.d("StartRoute", "BottomSheet configurado - peekHeight: $collapsedHeight, expandedOffset: $expandedOffset")
+            }
+        })
+        
+        // Listener para quando o bottom sheet é arrastado
+        bottomSheetBehavior.addBottomSheetCallback(object : com.google.android.material.bottomsheet.BottomSheetBehavior.BottomSheetCallback() {
+            override fun onStateChanged(bottomSheet: View, newState: Int) {
+                when (newState) {
+                    com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED -> {
+                        // Quando expandido, mostra botões de ação se rota iniciada
+                        if (routeStarted) {
+                            llActionButtons.visibility = View.VISIBLE
+                            tvViewRouteRecords.visibility = View.VISIBLE
+                        }
+                    }
+                    com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED -> {
+                        // Quando colapsado, esconde botões de ação
+                        llActionButtons.visibility = View.GONE
+                        tvViewRouteRecords.visibility = View.GONE
+                    }
+                    com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_DRAGGING -> {
+                        // Durante o arraste (não precisa fazer nada)
+                    }
+                    com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_SETTLING -> {
+                        // Durante a animação (não precisa fazer nada)
+                    }
+                }
+            }
+            
+            override fun onSlide(bottomSheet: View, slideOffset: Float) {
+                // slideOffset: 0.0 quando colapsado, 1.0 quando expandido
+                // O BottomSheetBehavior gerencia automaticamente a animação
+            }
+        })
+
+        // Configura RecyclerView para próximos pontos
+        rvNextPoints.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
+        nextPointAdapter = br.edu.utfpr.coletapb.adapter.NextPointAdapter(emptyList())
+        rvNextPoints.adapter = nextPointAdapter
 
         // Atualiza header
         tvRouteName.text = routeName ?: "Rota"
@@ -341,8 +436,10 @@ class StartRoute : AppCompatActivity() {
         btStart.setOnClickListener { onStartRoute() }
         btRegisterCollection.setOnClickListener { showConfirmCollectionDialog() }
         btRegisterProblem.setOnClickListener { showRegisterProblemDialog() }
-        tvViewRouteList.setOnClickListener { showRoutePointsList() }
-        tvCancelRoute.setOnClickListener { showCancelRouteDialog() }
+        btCancelRoute.setOnClickListener { showCancelRouteDialog() }
+        btFinishRoute.setOnClickListener { onFinishRoute() }
+        btViewRouteRecords.setOnClickListener { showRoutePointsList() }
+        tvViewRouteRecords.setOnClickListener { showRoutePointsList() }
         fabCenterLocation.setOnClickListener { centerMapOnCurrentLocation() }
         
         // Inicia monitoramento contínuo do GPS
@@ -399,45 +496,27 @@ class StartRoute : AppCompatActivity() {
     private fun checkCurrentExecution() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                // Primeiro verifica localmente
-                val currentExec = executionDao.getCurrentExecution()
-                if (currentExec != null) {
-                    execLocalId = currentExec.localId
-                    backendExecutionId = currentExec.backendId
-                    
-                    // Se não tem backendId mas está online, tenta buscar do backend
-                    if (backendExecutionId == null && syncRepository.isOnline() && assignmentId > 0) {
-                        Log.d("StartRoute", "Execução local sem backendId, buscando do backend...")
-                        val backendExecResult = executionRepository.getMyCurrentExecution()
-                        backendExecResult.fold(
-                            onSuccess = { backendExec ->
-                                if (backendExec != null && backendExec.assignmentId == assignmentId) {
-                                    backendExecutionId = backendExec.id
-                                    // Atualiza execução local com backendId
-                                    val updatedExec = currentExec.copy(backendId = backendExec.id)
-                                    executionDao.update(updatedExec)
-                                    Log.d("StartRoute", "BackendId atualizado: ${backendExec.id}")
-                                }
-                            },
-                            onFailure = { error ->
-                                Log.w("StartRoute", "Erro ao buscar execução do backend: ${error.message}")
-                            }
-                        )
-                    }
-                    
-                    withContext(Dispatchers.Main) {
-                        routeStarted = true
-                        applyUiState()
-                    }
-                } else {
-                    // Se não tem execução local, tenta buscar do backend
-                    if (syncRepository.isOnline() && assignmentId > 0) {
-                        Log.d("StartRoute", "Nenhuma execução local, buscando do backend...")
-                        val backendExecResult = executionRepository.getMyCurrentExecution()
-                        backendExecResult.fold(
-                            onSuccess = { backendExec ->
-                                if (backendExec != null && backendExec.assignmentId == assignmentId) {
-                                    // Cria execução local a partir da do backend
+                // SEMPRE verifica primeiro no backend se há execução iniciada
+                // Isso garante que só mostra os botões de registrar coleta/problema
+                // se realmente houver uma execução iniciada no backend
+                if (syncRepository.isOnline() && assignmentId > 0) {
+                    Log.d("StartRoute", "Verificando execução no backend...")
+                    val backendExecResult = executionRepository.getMyCurrentExecution()
+                    backendExecResult.fold(
+                        onSuccess = { backendExec ->
+                            if (backendExec != null && backendExec.assignmentId == assignmentId) {
+                                // Há execução iniciada no backend para este assignment
+                                backendExecutionId = backendExec.id
+                                Log.d("StartRoute", "Execução encontrada no backend: id=${backendExec.id}")
+                                
+                                // Verifica se há execução local correspondente
+                                val currentExec = executionDao.getCurrentExecution()
+                                if (currentExec != null && currentExec.backendId == backendExec.id) {
+                                    // Já existe execução local sincronizada
+                                    execLocalId = currentExec.localId
+                                    Log.d("StartRoute", "Execução local já existe e está sincronizada")
+                                } else {
+                                    // Cria ou atualiza execução local a partir da do backend
                                     val startTimestamp = try {
                                         backendExec.startTime?.let { 
                                             java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault())
@@ -447,34 +526,95 @@ class StartRoute : AppCompatActivity() {
                                         System.currentTimeMillis()
                                     }
                                     
-                                    val executionLocal = ExecutionLocal(
-                                        routeId = routeId,
-                                        vehicleId = null,
-                                        driverId = prefsHelper.getDriverId().takeIf { it > 0 },
-                                        startTimestamp = startTimestamp,
-                                        startLat = backendExec.startLat ?: 0.0,
-                                        startLng = backendExec.startLng ?: 0.0,
-                                        status = backendExec.status ?: "IN_PROGRESS",
-                                        backendId = backendExec.id
-                                    )
-                                    execLocalId = executionDao.insert(executionLocal)
-                                    backendExecutionId = backendExec.id
-                                    Log.d("StartRoute", "Execução criada localmente a partir do backend: execLocalId=$execLocalId, backendId=$backendExecutionId")
-                                    
-                                    withContext(Dispatchers.Main) {
-                                        routeStarted = true
-                                        applyUiState()
+                                    if (currentExec != null) {
+                                        // Atualiza execução local existente
+                                        val updatedExec = currentExec.copy(
+                                            backendId = backendExec.id,
+                                            status = backendExec.status ?: "IN_PROGRESS",
+                                            startTimestamp = startTimestamp,
+                                            startLat = backendExec.startLat ?: currentExec.startLat,
+                                            startLng = backendExec.startLng ?: currentExec.startLng
+                                        )
+                                        executionDao.update(updatedExec)
+                                        execLocalId = currentExec.localId
+                                        Log.d("StartRoute", "Execução local atualizada com backendId: ${backendExec.id}")
+                                    } else {
+                                        // Cria nova execução local
+                                        val executionLocal = ExecutionLocal(
+                                            routeId = routeId,
+                                            vehicleId = null,
+                                            driverId = prefsHelper.getDriverId().takeIf { it > 0 },
+                                            startTimestamp = startTimestamp,
+                                            startLat = backendExec.startLat ?: 0.0,
+                                            startLng = backendExec.startLng ?: 0.0,
+                                            status = backendExec.status ?: "IN_PROGRESS",
+                                            backendId = backendExec.id
+                                        )
+                                        execLocalId = executionDao.insert(executionLocal)
+                                        Log.d("StartRoute", "Execução local criada a partir do backend: execLocalId=$execLocalId, backendId=$backendExecutionId")
                                     }
                                 }
-                            },
-                            onFailure = { error ->
-                                Log.d("StartRoute", "Nenhuma execução no backend: ${error.message}")
+                                
+                                // Marca como iniciada apenas se houver execução no backend
+                                withContext(Dispatchers.Main) {
+                                    routeStarted = true
+                                    applyUiState()
+                                }
+                            } else {
+                                // Não há execução no backend para este assignment
+                                Log.d("StartRoute", "Nenhuma execução no backend para este assignment")
+                                
+                                // Limpa execução local se existir (pode ser antiga ou incompleta)
+                                val currentExec = executionDao.getCurrentExecution()
+                                if (currentExec != null && currentExec.backendId == null) {
+                                    // Se há execução local sem backendId, pode ser antiga
+                                    // Não marca como iniciada, apenas limpa se necessário
+                                    Log.d("StartRoute", "Execução local sem backendId encontrada, mas não há execução no backend")
+                                }
+                                
+                                withContext(Dispatchers.Main) {
+                                    routeStarted = false
+                                    applyUiState()
+                                }
                             }
-                        )
+                        },
+                        onFailure = { error ->
+                            // Erro ao buscar do backend ou não há execução (404)
+                            Log.d("StartRoute", "Nenhuma execução no backend ou erro: ${error.message}")
+                            
+                            // Não marca como iniciada se não há confirmação do backend
+                            withContext(Dispatchers.Main) {
+                                routeStarted = false
+                                applyUiState()
+                            }
+                        }
+                    )
+                } else {
+                    // Offline ou assignmentId inválido - verifica apenas localmente
+                    // Mas não marca como iniciada se não tiver backendId
+                    val currentExec = executionDao.getCurrentExecution()
+                    if (currentExec != null && currentExec.backendId != null) {
+                        // Há execução local com backendId (foi iniciada antes)
+                        execLocalId = currentExec.localId
+                        backendExecutionId = currentExec.backendId
+                        withContext(Dispatchers.Main) {
+                            routeStarted = true
+                            applyUiState()
+                        }
+                    } else {
+                        // Não há execução local válida ou não tem backendId
+                        withContext(Dispatchers.Main) {
+                            routeStarted = false
+                            applyUiState()
+                        }
                     }
                 }
             } catch (e: Exception) {
                 Log.e("StartRoute", "Erro ao verificar execução atual: ${e.message}", e)
+                withContext(Dispatchers.Main) {
+                    routeStarted = false
+                    applyUiState()
+                }
             }
         }
     }
@@ -559,6 +699,12 @@ class StartRoute : AppCompatActivity() {
                     routeStarted = true
                     currentLocation = location
                     location?.let { updateCurrentLocationOnMap(it) }
+                    
+                    // Garante que o bottom sheet fica colapsado quando inicia a rota
+                    if (::bottomSheetBehavior.isInitialized) {
+                        bottomSheetBehavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED
+                    }
+                    
                     applyUiState()
                     Toast.makeText(
                         this@StartRoute,
@@ -1083,18 +1229,24 @@ class StartRoute : AppCompatActivity() {
         val route = routeWithPoints ?: return
         val points = route.collectionPoints
         
+        if (points.isEmpty()) {
+            return
+        }
+        
+        // Atualiza progresso se rota iniciada
+        if (routeStarted) {
+            val totalPoints = points.size
+            val visitedPoints = currentPointIndex
+            tvPointsProgress.text = "($visitedPoints/$totalPoints)"
+            tvPointsProgress.visibility = View.VISIBLE
+        }
+        
+        // Cria lista dos próximos 2-3 pontos
+        val nextPoints = mutableListOf<br.edu.utfpr.coletapb.adapter.NextPointItem>()
+        
         if (currentPointIndex < points.size) {
+            // Primeiro ponto (próximo)
             val nextPoint = points[currentPointIndex]
-            tvNextPointTitle.text = "Ponto ${nextPoint.sequenceOrder} – ${nextPoint.address}"
-            
-            val wasteType = when (nextPoint.wasteType) {
-                "COMMERCIAL" -> "Comercial"
-                "RESIDENTIAL" -> "Residencial"
-                "ORGANIC" -> "Orgânicos"
-                else -> nextPoint.wasteType
-            }
-            
-            // Calcula distância se tiver localização atual
             val distanceText = currentLocation?.let { loc ->
                 val distance = FloatArray(1)
                 Location.distanceBetween(
@@ -1104,16 +1256,62 @@ class StartRoute : AppCompatActivity() {
                 )
                 val distanceMeters = distance[0].toInt()
                 if (distanceMeters < 1000) {
-                    "a $distanceMeters m"
+                    "Em $distanceMeters m"
                 } else {
-                    "a ${String.format(Locale.getDefault(), "%.1f", distanceMeters / 1000f)} km"
+                    "Em ${String.format(Locale.getDefault(), "%.1f", distanceMeters / 1000f)} km"
                 }
-            } ?: ""
+            } ?: null
             
-            tvNextPointInfo.text = "$wasteType • $distanceText"
+            nextPoints.add(
+                br.edu.utfpr.coletapb.adapter.NextPointItem(
+                    point = nextPoint,
+                    distance = distanceText,
+                    status = if (currentPointIndex == 0) "Recomendado" else "Próximo"
+                )
+            )
+            
+            // Segundo e terceiro pontos (se existirem)
+            for (i in 1..2) {
+                if (currentPointIndex + i < points.size) {
+                    val point = points[currentPointIndex + i]
+                    val distanceText2 = currentLocation?.let { loc ->
+                        val distance = FloatArray(1)
+                        Location.distanceBetween(
+                            loc.latitude, loc.longitude,
+                            point.latitude, point.longitude,
+                            distance
+                        )
+                        val distanceMeters = distance[0].toInt()
+                        if (distanceMeters < 1000) {
+                            "Em $distanceMeters m"
+                        } else {
+                            "Em ${String.format(Locale.getDefault(), "%.1f", distanceMeters / 1000f)} km"
+                        }
+                    } ?: null
+                    
+                    nextPoints.add(
+                        br.edu.utfpr.coletapb.adapter.NextPointItem(
+                            point = point,
+                            distance = distanceText2,
+                            status = "Próximo"
+                        )
+                    )
+                }
+            }
         } else {
-            tvNextPointTitle.text = "Rota concluída"
-            tvNextPointInfo.text = "Todos os pontos foram visitados"
+            // Rota concluída
+            tvNextPointsTitle.text = "Rota concluída"
+        }
+        
+        // Atualiza adapter
+        if (::nextPointAdapter.isInitialized) {
+            // Se já existe, atualiza a lista
+            nextPointAdapter = br.edu.utfpr.coletapb.adapter.NextPointAdapter(nextPoints)
+            rvNextPoints.adapter = nextPointAdapter
+        } else {
+            // Primeira vez, cria o adapter
+            nextPointAdapter = br.edu.utfpr.coletapb.adapter.NextPointAdapter(nextPoints)
+            rvNextPoints.adapter = nextPointAdapter
         }
     }
     
@@ -1427,11 +1625,25 @@ class StartRoute : AppCompatActivity() {
     
     private fun applyUiState() {
         if (routeStarted) {
+            // Rota iniciada - mostra informações e botões quando expandido
             btStart.visibility = View.GONE
-            btRegisterCollection.visibility = View.VISIBLE
-            btRegisterProblem.visibility = View.VISIBLE
+            llRouteStatus.visibility = View.VISIBLE
+            chipMode.visibility = View.VISIBLE
+            tvRouteSubtitle.visibility = View.GONE
+            
+            // Botões de ação aparecem apenas quando expandido (gerenciado pelo listener)
+            if (::bottomSheetBehavior.isInitialized) {
+                llActionButtons.visibility = if (bottomSheetBehavior.state == com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED) {
+                    View.VISIBLE
+                } else {
+                    View.GONE
+                }
+            } else {
+                llActionButtons.visibility = View.GONE
+            }
+            
             tvStatus.text = "Em andamento"
-            supportActionBar?.title = "Rota em andamento"
+            supportActionBar?.title = routeName ?: "Rota em andamento"
             
             // Atualiza horário de início (assíncrono)
             if (execLocalId > 0L) {
@@ -1446,12 +1658,24 @@ class StartRoute : AppCompatActivity() {
                 }
             }
         } else {
+            // Rota não iniciada - apenas botão de iniciar
             btStart.visibility = View.VISIBLE
-            btRegisterCollection.visibility = View.GONE
-            btRegisterProblem.visibility = View.GONE
-            tvStatus.text = "Não iniciada"
-            tvStartTime.text = ""
-            supportActionBar?.title = "Iniciar rota"
+            llActionButtons.visibility = View.GONE
+            llRouteStatus.visibility = View.GONE
+            chipMode.visibility = View.GONE
+            tvPointsProgress.visibility = View.GONE
+            tvViewRouteRecords.visibility = View.GONE
+            
+            tvRouteSubtitle.text = "Você ainda não iniciou a rota"
+            tvRouteSubtitle.visibility = View.VISIBLE
+            supportActionBar?.title = routeName ?: "Iniciar rota"
+            
+            // Garante que o bottom sheet está colapsado quando não iniciada
+            if (::bottomSheetBehavior.isInitialized) {
+                if (bottomSheetBehavior.state != com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED) {
+                    bottomSheetBehavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED
+                }
+            }
         }
         updateNextPointInfo()
     }
