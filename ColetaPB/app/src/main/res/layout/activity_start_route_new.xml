@@ -220,7 +220,6 @@
                     android:visibility="gone" />
 
                 <!-- Botões de ação (visíveis apenas quando iniciada E expandido) -->
-                <!-- Grid consistente: 2 botões por linha, mesma largura e altura -->
                 <LinearLayout
                     android:id="@+id/llActionButtons"
                     android:layout_width="match_parent"
@@ -229,44 +228,22 @@
                     android:orientation="vertical"
                     android:visibility="gone">
 
-                    <!-- Linha 1: Registrar coleta | Registrar problema -->
-                    <LinearLayout
+                    <!-- Botão principal: Registrar coleta (grande, azul, largura total) -->
+                    <Button
+                        android:id="@+id/btRegisterCollection"
                         android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:weightSum="2">
+                        android:layout_height="56dp"
+                        android:text="Registrar coleta"
+                        android:textAllCaps="false"
+                        android:textSize="16sp"
+                        android:drawableStart="@android:drawable/checkbox_on_background"
+                        android:drawablePadding="8dp"
+                        android:drawableTint="@color/white"
+                        android:backgroundTint="@color/primary_blue"
+                        android:textColor="@color/white"
+                        style="@style/Widget.Material3.Button" />
 
-                        <Button
-                            android:id="@+id/btRegisterCollection"
-                            android:layout_width="0dp"
-                            android:layout_height="56dp"
-                            android:layout_weight="1"
-                            android:layout_marginEnd="8dp"
-                            android:text="Registrar coleta"
-                            android:textAllCaps="false"
-                            android:textSize="16sp"
-                            android:drawableStart="@android:drawable/checkbox_on_background"
-                            android:drawablePadding="8dp"
-                            android:backgroundTint="@color/primary_blue"
-                            android:textColor="@color/white" />
-
-                        <Button
-                            android:id="@+id/btRegisterProblem"
-                            android:layout_width="0dp"
-                            android:layout_height="56dp"
-                            android:layout_weight="1"
-                            android:layout_marginStart="8dp"
-                            android:text="Registrar problema"
-                            android:textAllCaps="false"
-                            android:textSize="16sp"
-                            android:drawableStart="@android:drawable/ic_dialog_alert"
-                            android:drawablePadding="8dp"
-                            android:backgroundTint="@android:color/transparent"
-                            android:textColor="@color/error"
-                            style="@style/Widget.Material3.Button.OutlinedButton" />
-                    </LinearLayout>
-
-                    <!-- Linha 2: Ver registros | Encerrar rota -->
+                    <!-- Linha 2: Registrar problema | Encerrar rota -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -275,17 +252,19 @@
                         android:weightSum="2">
 
                         <Button
-                            android:id="@+id/btViewRouteRecords"
+                            android:id="@+id/btRegisterProblem"
                             android:layout_width="0dp"
                             android:layout_height="56dp"
                             android:layout_weight="1"
                             android:layout_marginEnd="8dp"
-                            android:text="Ver registros"
+                            android:text="Registrar problema"
                             android:textAllCaps="false"
                             android:textSize="16sp"
-                            android:backgroundTint="@android:color/transparent"
-                            android:textColor="@color/primary_blue"
-                            style="@style/Widget.Material3.Button.OutlinedButton" />
+                            android:drawableStart="@android:drawable/ic_dialog_alert"
+                            android:drawablePadding="8dp"
+                            android:drawableTint="@color/error"
+                            android:background="@drawable/button_outlined_red_ripple"
+                            android:textColor="@color/error" />
 
                         <Button
                             android:id="@+id/btFinishRoute"
@@ -296,11 +275,11 @@
                             android:text="Encerrar rota"
                             android:textAllCaps="false"
                             android:textSize="16sp"
-                            android:backgroundTint="@color/primary_blue"
-                            android:textColor="@color/white" />
+                            android:textColor="@color/text_primary"
+                            style="@style/Widget.Material3.Button.TonalButton" />
                     </LinearLayout>
 
-                    <!-- Linha 3: Cancelar rota (centralizado, largura total) -->
+                    <!-- Botão Cancelar rota (TextButton, apenas texto vermelho, sem fundo) -->
                     <Button
                         android:id="@+id/btCancelRoute"
                         android:layout_width="match_parent"
@@ -309,9 +288,8 @@
                         android:text="Cancelar rota"
                         android:textAllCaps="false"
                         android:textSize="16sp"
-                        android:backgroundTint="@android:color/transparent"
                         android:textColor="@color/error"
-                        style="@style/Widget.Material3.Button.OutlinedButton" />
+                        style="@style/Widget.Material3.Button.TextButton" />
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>

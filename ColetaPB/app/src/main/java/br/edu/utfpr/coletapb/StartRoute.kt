@@ -64,7 +64,6 @@ class StartRoute : AppCompatActivity() {
     private lateinit var btRegisterProblem: Button
     private lateinit var btCancelRoute: Button
     private lateinit var btFinishRoute: Button
-    private lateinit var btViewRouteRecords: Button
     private lateinit var tvRouteName: TextView
     private lateinit var tvStartTime: TextView
     private lateinit var tvStatus: TextView
@@ -164,7 +163,6 @@ class StartRoute : AppCompatActivity() {
         btRegisterProblem = findViewById(R.id.btRegisterProblem)
         btCancelRoute = findViewById(R.id.btCancelRoute)
         btFinishRoute = findViewById(R.id.btFinishRoute)
-        btViewRouteRecords = findViewById(R.id.btViewRouteRecords)
         fabCenterLocation = findViewById(R.id.fabCenterLocation)
 
         // Configura BottomSheetBehavior usando técnicas corretas de mobile:
@@ -438,7 +436,6 @@ class StartRoute : AppCompatActivity() {
         btRegisterProblem.setOnClickListener { showRegisterProblemDialog() }
         btCancelRoute.setOnClickListener { showCancelRouteDialog() }
         btFinishRoute.setOnClickListener { onFinishRoute() }
-        btViewRouteRecords.setOnClickListener { showRoutePointsList() }
         tvViewRouteRecords.setOnClickListener { showRoutePointsList() }
         fabCenterLocation.setOnClickListener { centerMapOnCurrentLocation() }
         

@@ -21,4 +21,10 @@
     </style>
 
     <style name="Theme.ColetaPB" parent="Base.Theme.ColetaPB" />
+    
+    <!-- Estilo para botões outlined sem backgroundTint -->
+    <style name="ButtonOutlined" parent="Widget.Material3.Button">
+        <item name="backgroundTint">@null</item>
+        <item name="android:background">@null</item>
+    </style>
 </resources>
