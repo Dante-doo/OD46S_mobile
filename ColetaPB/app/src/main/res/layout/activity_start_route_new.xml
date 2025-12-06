@@ -228,8 +228,8 @@
                     android:orientation="vertical"
                     android:visibility="gone">
 
-                    <!-- Botão principal: Registrar coleta (grande, azul, largura total) -->
-                    <Button
+                    <!-- Ação principal: Registrar coleta (cheio, azul, largura total) -->
+                    <com.google.android.material.button.MaterialButton
                         android:id="@+id/btRegisterCollection"
                         android:layout_width="match_parent"
                         android:layout_height="56dp"
@@ -239,19 +239,20 @@
                         android:drawableStart="@android:drawable/checkbox_on_background"
                         android:drawablePadding="8dp"
                         android:drawableTint="@color/white"
-                        android:backgroundTint="@color/primary_blue"
                         android:textColor="@color/white"
-                        style="@style/Widget.Material3.Button" />
+                        app:cornerRadius="8dp"
+                        style="@style/Widget.Material3.Button"
+                        app:backgroundTint="@color/primary_blue" />
 
-                    <!-- Linha 2: Registrar problema | Encerrar rota -->
+                    <!-- Linha 2: Registrar problema | Cancelar rota -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="12dp"
-                        android:orientation="horizontal"
-                        android:weightSum="2">
+                        android:orientation="horizontal">
 
-                        <Button
+                        <!-- Registrar problema: outlined vermelho -->
+                        <com.google.android.material.button.MaterialButton
                             android:id="@+id/btRegisterProblem"
                             android:layout_width="0dp"
                             android:layout_height="56dp"
@@ -260,36 +261,48 @@
                             android:text="Registrar problema"
                             android:textAllCaps="false"
                             android:textSize="16sp"
-                            android:drawableStart="@android:drawable/ic_dialog_alert"
-                            android:drawablePadding="8dp"
-                            android:drawableTint="@color/error"
-                            android:background="@drawable/button_outlined_red_ripple"
-                            android:textColor="@color/error" />
+                            android:textColor="@color/error"
+                            android:background="@drawable/button_outlined_red"
+                            app:backgroundTint="@android:color/transparent"
+                            app:icon="@android:drawable/ic_dialog_alert"
+                            app:iconTint="@color/error"
+                            app:iconPadding="8dp"
+                            app:iconGravity="textStart"
+                            style="@style/Widget.Material3.Button" />
 
-                        <Button
-                            android:id="@+id/btFinishRoute"
+                        <!-- Cancelar rota: outlined vermelho -->
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btCancelRoute"
                             android:layout_width="0dp"
                             android:layout_height="56dp"
                             android:layout_weight="1"
                             android:layout_marginStart="8dp"
-                            android:text="Encerrar rota"
+                            android:text="Cancelar rota"
                             android:textAllCaps="false"
                             android:textSize="16sp"
-                            android:textColor="@color/text_primary"
-                            style="@style/Widget.Material3.Button.TonalButton" />
+                            android:textColor="@color/error"
+                            android:background="@drawable/button_outlined_red"
+                            app:backgroundTint="@android:color/transparent"
+                            app:icon="@android:drawable/ic_menu_delete"
+                            app:iconTint="@color/error"
+                            app:iconPadding="8dp"
+                            app:iconGravity="textStart"
+                            style="@style/Widget.Material3.Button" />
                     </LinearLayout>
 
-                    <!-- Botão Cancelar rota (TextButton, apenas texto vermelho, sem fundo) -->
-                    <Button
-                        android:id="@+id/btCancelRoute"
+                    <!-- Encerrar rota: outlined neutro, largura total -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btFinishRoute"
                         android:layout_width="match_parent"
                         android:layout_height="56dp"
-                        android:layout_marginTop="12dp"
-                        android:text="Cancelar rota"
+                        android:layout_marginTop="16dp"
+                        android:text="Encerrar rota"
                         android:textAllCaps="false"
                         android:textSize="16sp"
-                        android:textColor="@color/error"
-                        style="@style/Widget.Material3.Button.TextButton" />
+                        android:textColor="@color/text_primary"
+                        android:background="@drawable/button_outlined_neutral"
+                        app:backgroundTint="@android:color/transparent"
+                        style="@style/Widget.Material3.Button" />
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>

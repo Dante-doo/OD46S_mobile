@@ -82,4 +82,28 @@ class RouteRepository(private val prefsHelper: SharedPreferencesHelper) {
             Result.failure(e)
         }
     }
+    
+    suspend fun getRouteMap(routeId: Long): Result<Map<String, Any>> = withContext(Dispatchers.IO) {
+        try {
+            val response = RetrofitClient.apiService.getRouteMap(routeId)
+            
+            if (response.isSuccessful && response.body() != null) {
+                val body = response.body()!!
+                val data = body["data"] as? Map<String, Any>
+                
+                if (data != null) {
+                    Result.success(data)
+                } else {
+                    Result.failure(Exception("Resposta vazia do servidor"))
+                }
+            } else {
+                val errorMsg = response.errorBody()?.string() ?: "Erro desconhecido"
+                Log.e("RouteRepository", "Erro ao buscar mapa da rota: ${response.code()} - $errorMsg")
+                Result.failure(Exception("Erro ao buscar mapa da rota: ${response.code()}"))
+            }
+        } catch (e: Exception) {
+            Log.e("RouteRepository", "Exceção ao buscar mapa da rota: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
 }

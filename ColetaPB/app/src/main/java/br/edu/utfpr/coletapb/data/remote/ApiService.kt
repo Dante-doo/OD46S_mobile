@@ -47,6 +47,12 @@ interface ApiService {
     @GET("routes/{id}")
     suspend fun getRouteWithPoints(@Path("id") routeId: Long): Response<Map<String, Any>>
 
+    /**
+     * Busca as áreas (polígonos) de uma rota específica como GeoJSON
+     */
+    @GET("routes/{id}/map")
+    suspend fun getRouteMap(@Path("id") routeId: Long): Response<Map<String, Any>>
+
     // ========== EXECUTIONS ==========
     /**
      * Inicia uma nova execução de coleta

@@ -44,7 +44,7 @@ import org.osmdroid.views.MapView
 import javax.net.ssl.HttpsURLConnection
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
-import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
+import org.osmdroid.views.overlay.Polygon
 import br.edu.utfpr.coletapb.utils.GpsMonitor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -53,7 +53,10 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.Drawable
+ 
 class StartRoute : AppCompatActivity() {
 
     private var routeStarted = false
@@ -84,9 +87,10 @@ class StartRoute : AppCompatActivity() {
 
     // Map (OSMDroid)
     private lateinit var mapView: MapView
-    private var currentLocationOverlay: MyLocationNewOverlay? = null
+    private var currentLocationMarker: Marker? = null
     private val pointMarkers = mutableListOf<Marker>()
     private var routePolyline: Polyline? = null
+    private val routePolygons = mutableListOf<Polygon>()
 
     // Route data
     private var routeWithPoints: RouteWithPoints? = null
@@ -108,6 +112,7 @@ class StartRoute : AppCompatActivity() {
 
     // Location
     private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private var locationCallback: LocationCallback? = null
 
     // Execução
     private var execLocalId: Long = 0L
@@ -392,11 +397,7 @@ class StartRoute : AppCompatActivity() {
         Log.d("StartRoute", "Mapa inicializado - Zoom: ${mapView.zoomLevelDouble}, DataConnection: ${mapView.useDataConnection()}, TileSource: ${mapView.tileProvider.tileSource.name()}")
         
         // Configura overlay de localização
-        if (checkLocationPermissions() && gpsMonitor.isGpsEnabled()) {
-            currentLocationOverlay = MyLocationNewOverlay(mapView)
-            currentLocationOverlay?.enableMyLocation()
-            mapView.overlays.add(currentLocationOverlay)
-        }
+        setupLocationOverlay()
 
         // Carrega pontos da rota
         loadRoutePoints()
@@ -476,18 +477,173 @@ class StartRoute : AppCompatActivity() {
         
         // Verifica se GPS foi ativado quando o usuário volta das configurações
         if (checkLocationPermissions() && gpsMonitor.isGpsEnabled()) {
-            // Se GPS está ativo agora, atualiza o overlay de localização
-            if (currentLocationOverlay == null) {
-                currentLocationOverlay = MyLocationNewOverlay(mapView)
-                currentLocationOverlay?.enableMyLocation()
-                mapView.overlays.add(currentLocationOverlay)
-            }
+            // Se GPS está ativo agora, configura o "overlay" de localização
+            // (na prática, apenas o marker azul + updates do FusedLocation)
+            setupLocationOverlay()
         }
     }
     
     override fun onPause() {
         super.onPause()
         mapView.onPause()
+        
+        // Remove atualizações de localização para economizar bateria
+        locationCallback?.let { 
+            fusedLocationClient.removeLocationUpdates(it)
+        }
+    }
+    
+    private fun setupLocationOverlay() {
+        // Agora usamos apenas o marker customizado (ponto azul), sem MyLocationNewOverlay
+        if (!checkLocationPermissions() || !gpsMonitor.isGpsEnabled()) {
+            Log.w(
+                "StartRoute",
+                "Não foi possível configurar localização: sem permissão ou GPS desativado"
+            )
+            return
+        }
+
+        // Se ainda não criamos o marker, cria agora
+        if (currentLocationMarker == null) {
+            createCustomLocationMarker()
+        } else {
+            // Se já existe, apenas reinicia as atualizações de localização
+            startLocationUpdatesForMarker()
+        }
+    }
+    
+    private fun createCustomLocationMarker() {
+        // Remove marker anterior se existir
+        currentLocationMarker?.let { mapView.overlays.remove(it) }
+        
+        // Cria novo marker com ícone customizado
+        currentLocationMarker = Marker(mapView)
+        currentLocationMarker?.title = "Minha localização"
+        
+        // Configura ícone customizado (estilo Google Maps - azul)
+        try {
+            val locationIcon = ContextCompat.getDrawable(this, R.drawable.my_location_icon)
+            locationIcon?.let { drawable ->
+                val size = (32 * resources.displayMetrics.density).toInt() // Menor, mais próximo do Google Maps
+                drawable.setBounds(0, 0, size, size)
+                
+                // Não aplica tint, o drawable já tem a cor azul definida
+                currentLocationMarker?.icon = drawable
+                currentLocationMarker?.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                Log.d("StartRoute", "Marker de localização customizado criado (${size}px, estilo Google Maps)")
+            } ?: run {
+                // Se não conseguir carregar, usa um drawable simples azul (cor do Google)
+                val size = (32 * resources.displayMetrics.density).toInt()
+                val blueCircle = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(android.graphics.Color.parseColor("#4285F4")) // Azul do Google
+                    setSize(size, size)
+                }
+                currentLocationMarker?.icon = blueCircle
+                currentLocationMarker?.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                Log.d("StartRoute", "Marker de localização criado com drawable simples azul")
+            }
+        } catch (e: Exception) {
+            Log.w("StartRoute", "Erro ao criar marker customizado: ${e.message}")
+            // Fallback: cria um círculo azul simples (cor do Google)
+            try {
+                val size = (32 * resources.displayMetrics.density).toInt()
+                val blueCircle = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(android.graphics.Color.parseColor("#4285F4")) // Azul do Google
+                    setSize(size, size)
+                }
+                currentLocationMarker?.icon = blueCircle
+                currentLocationMarker?.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            } catch (e2: Exception) {
+                Log.e("StartRoute", "Erro ao criar fallback: ${e2.message}")
+            }
+        }
+        
+        // Adiciona ao mapa
+        currentLocationMarker?.let { mapView.overlays.add(it) }
+        
+        // Atualiza a posição inicial se já tiver localização
+        currentLocation?.let { location ->
+            updateLocationMarkerPosition(location)
+        }
+        
+        // Inicia atualização contínua da localização para o marker
+        startLocationUpdatesForMarker()
+    }
+    
+    private fun startLocationUpdatesForMarker() {
+        if (!checkLocationPermissions()) return
+
+        // Remove callback anterior se existir
+        locationCallback?.let {
+            fusedLocationClient.removeLocationUpdates(it)
+        }
+
+        // Cria novo callback para atualizar o marker
+        locationCallback = object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                result.lastLocation?.let { location ->
+                    currentLocation = location
+                    updateLocationMarkerPosition(location)
+                }
+            }
+        }
+
+        // Solicita atualizações de localização com intervalo mais curto
+        try {
+            val locationRequest = LocationRequest.Builder(
+                Priority.PRIORITY_HIGH_ACCURACY,
+                1500L // 1.5 segundos entre updates (intervalo médio)
+            )
+                .setMinUpdateIntervalMillis(800L)      // pode atualizar até ~0.8s
+                .setMaxUpdateDelayMillis(3000L)
+                .setWaitForAccurateLocation(false)
+                .build()
+
+            if (ActivityCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED ||
+                ActivityCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                locationCallback?.let { callback ->
+                    fusedLocationClient.requestLocationUpdates(
+                        locationRequest,
+                        callback,
+                        mainLooper
+                    )
+                    Log.d(
+                        "StartRoute",
+                        "Atualizações de localização iniciadas para marker customizado (estilo Google Maps)"
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("StartRoute", "Erro ao iniciar atualizações de localização: ${e.message}", e)
+        }
+    }
+    
+    private fun updateLocationMarkerPosition(location: Location) {
+        currentLocationMarker?.let { marker ->
+            val geoPoint = GeoPoint(location.latitude, location.longitude)
+            marker.position = geoPoint
+            mapView.invalidate()
+        }
+    }
+    
+    /**
+     * Converte um Drawable para Bitmap
+     */
+    private fun drawableToBitmap(drawable: Drawable, width: Int, height: Int): Bitmap {
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        drawable.setBounds(0, 0, canvas.width, canvas.height)
+        drawable.draw(canvas)
+        return bitmap
     }
     
     private fun checkCurrentExecution() {
@@ -556,6 +712,11 @@ class StartRoute : AppCompatActivity() {
                                 withContext(Dispatchers.Main) {
                                     routeStarted = true
                                     applyUiState()
+                                    
+                                    // Inicia serviço de rastreamento GPS se tiver permissões
+                                    if (checkLocationPermissions()) {
+                                        startGpsTracking()
+                                    }
                                 }
                             } else {
                                 // Não há execução no backend para este assignment
@@ -597,6 +758,11 @@ class StartRoute : AppCompatActivity() {
                         withContext(Dispatchers.Main) {
                             routeStarted = true
                             applyUiState()
+                            
+                            // Inicia serviço de rastreamento GPS se tiver permissões
+                            if (checkLocationPermissions()) {
+                                startGpsTracking()
+                            }
                         }
                     } else {
                         // Não há execução local válida ou não tem backendId
@@ -806,15 +972,24 @@ class StartRoute : AppCompatActivity() {
     }
     
     private fun startGpsTracking() {
+        if (execLocalId <= 0L) {
+            Log.w("StartRoute", "Não é possível iniciar GPS tracking: execLocalId inválido")
+            return
+        }
+        
         val intent = Intent(this, GpsTrackingService::class.java).apply {
             action = GpsTrackingService.ACTION_START_TRACKING
             putExtra(GpsTrackingService.EXTRA_EXECUTION_ID, execLocalId)
+            backendExecutionId?.let {
+                putExtra(GpsTrackingService.EXTRA_BACKEND_EXECUTION_ID, it)
+            }
         }
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
             startService(intent)
         }
+        Log.d("StartRoute", "Serviço de GPS tracking iniciado: execLocalId=$execLocalId, backendId=$backendExecutionId")
     }
     
     private fun stopGpsTracking() {
@@ -1141,6 +1316,103 @@ class StartRoute : AppCompatActivity() {
                 }
             }
         }
+        
+        // Carrega os polígonos da rota
+        loadRoutePolygons()
+    }
+    
+    private fun loadRoutePolygons() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val result = routeRepository.getRouteMap(routeId)
+                result.onSuccess { data ->
+                    val geojson = data["geojson"] as? Map<String, Any>
+                    if (geojson != null) {
+                        val features = geojson["features"] as? List<Map<String, Any>>
+                        if (features != null && features.isNotEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                drawPolygonsOnMap(features)
+                            }
+                        }
+                    }
+                }.onFailure { e ->
+                    Log.w("StartRoute", "Erro ao carregar polígonos da rota: ${e.message}")
+                    // Não mostra erro ao usuário, pois polígonos são opcionais
+                }
+            } catch (e: Exception) {
+                Log.e("StartRoute", "Exceção ao carregar polígonos: ${e.message}", e)
+            }
+        }
+    }
+    
+    private fun drawPolygonsOnMap(features: List<Map<String, Any>>) {
+        // Limpa polígonos anteriores
+        routePolygons.forEach { mapView.overlays.remove(it) }
+        routePolygons.clear()
+        
+        features.forEach { feature ->
+            try {
+                val geometry = feature["geometry"] as? Map<String, Any>
+                val properties = feature["properties"] as? Map<String, Any>
+                
+                if (geometry != null && geometry["type"] == "Polygon") {
+                    val coordinates = geometry["coordinates"] as? List<List<List<Double>>>
+                    
+                    if (coordinates != null && coordinates.isNotEmpty()) {
+                        // Pega o primeiro anel do polígono (exterior ring)
+                        val ring = coordinates[0]
+                        
+                        // Converte coordenadas para GeoPoints
+                        val geoPoints = ring.mapNotNull { coord ->
+                            if (coord.size >= 2) {
+                                // GeoJSON usa [longitude, latitude], OSMDroid usa [latitude, longitude]
+                                GeoPoint(coord[1], coord[0])
+                            } else {
+                                null
+                            }
+                        }
+                        
+                        if (geoPoints.size >= 3) {
+                            // Cria o polígono
+                            val polygon = Polygon(mapView)
+                            polygon.points = geoPoints
+                            
+                            // Aplica estilos do GeoJSON
+                            val strokeColor = parseColor(properties?.get("stroke_color") as? String ?: properties?.get("strokeColor") as? String ?: "#0066CC")
+                            val fillColor = parseColor(properties?.get("fill_color") as? String ?: properties?.get("fillColor") as? String ?: "#0066CC")
+                            val fillOpacity = (properties?.get("fill_opacity") as? Number ?: properties?.get("fillOpacity") as? Number)?.toFloat() ?: 0.4f
+                            
+                            polygon.strokeColor = strokeColor
+                            polygon.fillColor = fillColor
+                            polygon.strokeWidth = 2f
+                            
+                            // Aplica opacidade ao fillColor
+                            val alpha = (fillOpacity * 255).toInt()
+                            polygon.fillColor = (alpha shl 24) or (fillColor and 0x00FFFFFF)
+                            
+                            mapView.overlays.add(polygon)
+                            routePolygons.add(polygon)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("StartRoute", "Erro ao desenhar polígono: ${e.message}", e)
+            }
+        }
+        
+        mapView.invalidate()
+    }
+    
+    private fun parseColor(colorString: String): Int {
+        return try {
+            if (colorString.startsWith("#")) {
+                android.graphics.Color.parseColor(colorString)
+            } else {
+                android.graphics.Color.parseColor("#$colorString")
+            }
+        } catch (e: Exception) {
+            android.graphics.Color.parseColor("#0066CC") // Cor padrão azul
+        }
     }
     
     private fun drawRouteOnMap(route: RouteWithPoints) {
@@ -1148,6 +1420,7 @@ class StartRoute : AppCompatActivity() {
         pointMarkers.forEach { mapView.overlays.remove(it) }
         pointMarkers.clear()
         routePolyline?.let { mapView.overlays.remove(it) }
+        // Nota: não limpa os polígonos aqui, eles são gerenciados separadamente
         
         if (route.collectionPoints.isEmpty()) {
             Toast.makeText(this, "Nenhum ponto de coleta encontrado nesta rota.", Toast.LENGTH_SHORT).show()
@@ -1325,7 +1598,10 @@ class StartRoute : AppCompatActivity() {
     private fun updateCurrentLocationOnMap(location: Location) {
         currentLocation = location
         
-        // O MyLocationNewOverlay já gerencia a localização atual
+        // Atualiza o marker customizado se existir
+        updateLocationMarkerPosition(location)
+        
+        // Atualiza o marker de localização customizado
         // Apenas atualiza a distância até próximo ponto
         updateNextPointInfo()
     }
@@ -1712,9 +1988,7 @@ class StartRoute : AppCompatActivity() {
                 if (routeStarted) {
                     // Rota já iniciada, apenas atualiza o overlay
                     if (gpsMonitor.isGpsEnabled()) {
-                        currentLocationOverlay = MyLocationNewOverlay(mapView)
-                        currentLocationOverlay?.enableMyLocation()
-                        mapView.overlays.add(currentLocationOverlay)
+                        setupLocationOverlay()
                     }
                 } else {
                     // Verifica GPS antes de iniciar
@@ -1771,6 +2045,10 @@ class StartRoute : AppCompatActivity() {
         super.onDestroy()
         gpsMonitor.stopMonitoring()
         mapView.onPause()
+        // Remove atualizações de localização
+        locationCallback?.let { 
+            fusedLocationClient.removeLocationUpdates(it)
+        }
         if (routeStarted) {
             // Não para o serviço GPS aqui, apenas quando finalizar a rota
         }
