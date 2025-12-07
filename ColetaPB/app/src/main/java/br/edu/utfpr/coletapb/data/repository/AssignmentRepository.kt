@@ -93,25 +93,32 @@ class AssignmentRepository(private val prefsHelper: SharedPreferencesHelper) {
                 // Cria um conjunto de IDs já adicionados para evitar duplicatas
                 val addedIds = mutableSetOf<Long>()
                 
-                // Se há rota atual, verifica se ela pertence ao motorista atual antes de adicionar
-                if (currentAssignment != null) {
+                // Se há rota atual, verifica se ela pertence ao motorista atual E se a execução está realmente em andamento
+                if (currentAssignment != null && currentExecution != null && currentExecution.status == "IN_PROGRESS") {
                     // Valida que a rota atual pertence ao motorista atual
                     if (currentDriverId > 0 && currentAssignment.driverId != currentDriverId) {
                         Log.w("AssignmentRepository", "Rota atual não pertence ao motorista atual (driverId=${currentAssignment.driverId}, esperado=$currentDriverId). Ignorando.")
                     } else {
-                        val existingAssignment = filteredAssignments.find { it.id == currentAssignment.id }
-                        if (existingAssignment != null) {
-                            // Se já existe na lista, marca como atual e adiciona
-                            allAssignments.add(existingAssignment.copy(isCurrent = true))
-                            addedIds.add(existingAssignment.id)
-                            Log.d("AssignmentRepository", "Rota atual encontrada na lista e marcada como atual")
+                        // Verifica novamente se a execução está realmente em andamento antes de marcar como atual
+                        if (currentExecution.status == "IN_PROGRESS" && currentExecution.assignmentId == currentAssignment.id) {
+                            val existingAssignment = filteredAssignments.find { it.id == currentAssignment.id }
+                            if (existingAssignment != null) {
+                                // Se já existe na lista, marca como atual e adiciona
+                                allAssignments.add(existingAssignment.copy(isCurrent = true))
+                                addedIds.add(existingAssignment.id)
+                                Log.d("AssignmentRepository", "Rota atual encontrada na lista e marcada como atual (execução IN_PROGRESS)")
+                            } else {
+                                // Se não existe, adiciona como atual
+                                allAssignments.add(currentAssignment.copy(isCurrent = true))
+                                addedIds.add(currentAssignment.id)
+                                Log.d("AssignmentRepository", "Adicionada rota atual (não estava na lista de escalas ativas, execução IN_PROGRESS)")
+                            }
                         } else {
-                            // Se não existe, adiciona como atual
-                            allAssignments.add(currentAssignment)
-                            addedIds.add(currentAssignment.id)
-                            Log.d("AssignmentRepository", "Adicionada rota atual (não estava na lista de escalas ativas)")
+                            Log.d("AssignmentRepository", "Execução não está em IN_PROGRESS (status=${currentExecution.status}) ou não corresponde ao assignment. Não marcando como atual.")
                         }
                     }
+                } else if (currentAssignment != null && (currentExecution == null || currentExecution.status != "IN_PROGRESS")) {
+                    Log.d("AssignmentRepository", "Há assignment retornado pelo backend, mas execução está ${currentExecution?.status ?: "null"}. Não marcando como atual.")
                 }
                 
                 // Adiciona todas as escalas ativas filtradas que ainda não foram adicionadas

@@ -915,60 +915,93 @@ class StartRoute : AppCompatActivity() {
                             }
                             
                             if (matchesRoute && backendExec != null) {
-                                // ✅ Backend tem execução em andamento para esta rota -> ele é a verdade
-                                backendExecutionId = backendExec.id
-                                Log.d("StartRoute", "Execução encontrada no backend: id=${backendExec.id}, routeId=${backendExec.routeId}, assignmentId=${backendExec.assignmentId}")
+                                // ✅ Backend tem execução para esta rota -> verifica se está em andamento
+                                val execStatus = backendExec.status ?: "IN_PROGRESS"
+                                
+                                // Só marca como iniciada se o status for IN_PROGRESS
+                                if (execStatus == "IN_PROGRESS") {
+                                    backendExecutionId = backendExec.id
+                                    Log.d("StartRoute", "Execução encontrada no backend: id=${backendExec.id}, routeId=${backendExec.routeId}, assignmentId=${backendExec.assignmentId}, status=IN_PROGRESS")
 
-                                val startTimestamp = try {
-                                    backendExec.startTime?.let {
-                                        java.text.SimpleDateFormat(
-                                            "yyyy-MM-dd'T'HH:mm:ss",
-                                            java.util.Locale.getDefault()
-                                        ).parse(it)?.time
-                                    } ?: System.currentTimeMillis()
-                                } catch (e: Exception) {
-                                    System.currentTimeMillis()
-                                }
-
-                                val currentExec = executionDao.getCurrentExecution()
-                                if (currentExec != null && currentExec.backendId == backendExec.id) {
-                                    // Atualiza local se precisar
-                                    val updatedExec = currentExec.copy(
-                                        routeId = routeId,
-                                        status = backendExec.status ?: "IN_PROGRESS",
-                                        startTimestamp = startTimestamp,
-                                        startLat = backendExec.startLat ?: currentExec.startLat,
-                                        startLng = backendExec.startLng ?: currentExec.startLng
-                                    )
-                                    executionDao.update(updatedExec)
-                                    execLocalId = currentExec.localId
-                                } else {
-                                    // Cria execução local sincronizada com backend
-                                    val executionLocal = ExecutionLocal(
-                                        routeId = routeId,
-                                        vehicleId = null,
-                                        driverId = prefsHelper.getDriverId().takeIf { it > 0 },
-                                        startTimestamp = startTimestamp,
-                                        startLat = backendExec.startLat ?: 0.0,
-                                        startLng = backendExec.startLng ?: 0.0,
-                                        status = backendExec.status ?: "IN_PROGRESS",
-                                        backendId = backendExec.id
-                                    )
-                                    execLocalId = executionDao.insert(executionLocal)
-                                }
-
-                                withContext(Dispatchers.Main) {
-                                    routeStarted = true
-                                    applyUiState()
-
-                                    if (::bottomSheetBehavior.isInitialized) {
-                                        bottomSheetBehavior.state =
-                                            com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED
-                                        showActionButtons()
+                                    val startTimestamp = try {
+                                        backendExec.startTime?.let {
+                                            java.text.SimpleDateFormat(
+                                                "yyyy-MM-dd'T'HH:mm:ss",
+                                                java.util.Locale.getDefault()
+                                            ).parse(it)?.time
+                                        } ?: System.currentTimeMillis()
+                                    } catch (e: Exception) {
+                                        System.currentTimeMillis()
                                     }
 
-                                    if (checkLocationPermissions()) {
-                                        startGpsTracking()
+                                    val currentExec = executionDao.getCurrentExecution()
+                                    if (currentExec != null && currentExec.backendId == backendExec.id) {
+                                        // Atualiza local se precisar
+                                        val updatedExec = currentExec.copy(
+                                            routeId = routeId,
+                                            status = "IN_PROGRESS",
+                                            startTimestamp = startTimestamp,
+                                            startLat = backendExec.startLat ?: currentExec.startLat,
+                                            startLng = backendExec.startLng ?: currentExec.startLng
+                                        )
+                                        executionDao.update(updatedExec)
+                                        execLocalId = currentExec.localId
+                                    } else {
+                                        // Cria execução local sincronizada com backend
+                                        val executionLocal = ExecutionLocal(
+                                            routeId = routeId,
+                                            vehicleId = null,
+                                            driverId = prefsHelper.getDriverId().takeIf { it > 0 },
+                                            startTimestamp = startTimestamp,
+                                            startLat = backendExec.startLat ?: 0.0,
+                                            startLng = backendExec.startLng ?: 0.0,
+                                            status = "IN_PROGRESS",
+                                            backendId = backendExec.id
+                                        )
+                                        execLocalId = executionDao.insert(executionLocal)
+                                    }
+
+                                    withContext(Dispatchers.Main) {
+                                        routeStarted = true
+                                        applyUiState()
+
+                                        if (::bottomSheetBehavior.isInitialized) {
+                                            bottomSheetBehavior.state =
+                                                com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED
+                                            showActionButtons()
+                                        }
+
+                                        if (checkLocationPermissions()) {
+                                            startGpsTracking()
+                                        }
+                                    }
+                                } else {
+                                    // Execução existe mas está COMPLETED ou CANCELLED
+                                    Log.d("StartRoute", "Execução encontrada no backend mas está $execStatus (não IN_PROGRESS). Não iniciando rota.")
+                                    
+                                    // Atualiza execução local para refletir o status correto
+                                    val currentExec = executionDao.getCurrentExecution()
+                                    if (currentExec != null && currentExec.backendId == backendExec.id) {
+                                        val updatedExec = currentExec.copy(
+                                            status = execStatus,
+                                            endTimestamp = backendExec.endTime?.let {
+                                                try {
+                                                    java.text.SimpleDateFormat(
+                                                        "yyyy-MM-dd'T'HH:mm:ss",
+                                                        java.util.Locale.getDefault()
+                                                    ).parse(it)?.time
+                                                } catch (e: Exception) {
+                                                    null
+                                                }
+                                            } ?: currentExec.endTimestamp
+                                        )
+                                        executionDao.update(updatedExec)
+                                    }
+                                    
+                                    // Não marca como iniciada
+                                    withContext(Dispatchers.Main) {
+                                        routeStarted = false
+                                        applyUiState()
                                     }
                                 }
                             } else {

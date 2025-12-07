@@ -1,10 +1,15 @@
 package br.edu.utfpr.coletapb.dialog
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.location.Location
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
@@ -14,6 +19,9 @@ import android.widget.ImageView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.DialogFragment
 import br.edu.utfpr.coletapb.R
 import br.edu.utfpr.coletapb.data.model.GpsEventType
@@ -39,6 +47,7 @@ class RegisterCollectionDialog : DialogFragment() {
     private var pointName: String? = null
     private var currentLocation: Location? = null
     private var photoFile: File? = null
+    private var cameraPhotoUri: Uri? = null
     
     // Views
     private lateinit var edtObservations: TextInputEditText
@@ -79,12 +88,34 @@ class RegisterCollectionDialog : DialogFragment() {
         }
     }
     
-    // Launcher para seleção de foto (método moderno que não requer permissões)
+    // Launcher para seleção de foto da galeria (método moderno que não requer permissões)
     private val photoPickerLauncher = registerForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         uri?.let {
             handlePhotoSelection(it)
+        }
+    }
+    
+    // Launcher para solicitar permissão de câmera
+    private val cameraPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            openCameraInternal()
+        } else {
+            Toast.makeText(requireContext(), "Permissão de câmera necessária para tirar fotos", Toast.LENGTH_LONG).show()
+        }
+    }
+    
+    // Launcher para tirar foto com a câmera
+    private val cameraLauncher = registerForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success) {
+            cameraPhotoUri?.let { uri ->
+                handlePhotoSelection(uri)
+            }
         }
     }
     
@@ -134,7 +165,7 @@ class RegisterCollectionDialog : DialogFragment() {
         
         // Listeners
         btnAddPhoto.setOnClickListener {
-            openPhotoPicker()
+            showPhotoSourceDialog()
         }
         
         btnCancel.setOnClickListener {
@@ -147,10 +178,60 @@ class RegisterCollectionDialog : DialogFragment() {
     }
     
     /**
-     * Abre o seletor de foto (galeria)
+     * Mostra diálogo para escolher entre câmera ou galeria
+     */
+    private fun showPhotoSourceDialog() {
+        val options = arrayOf("Tirar foto", "Escolher da galeria")
+        AlertDialog.Builder(requireContext())
+            .setTitle("Adicionar foto")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> openCamera()
+                    1 -> openGallery()
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+    
+    /**
+     * Abre a câmera para tirar foto (verifica permissão primeiro)
+     */
+    private fun openCamera() {
+        // Verificar se a permissão já foi concedida
+        if (ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            openCameraInternal()
+        } else {
+            // Solicitar permissão
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+    
+    /**
+     * Abre a câmera internamente (após verificar permissão)
+     */
+    private fun openCameraInternal() {
+        try {
+            // Criar arquivo temporário para a foto
+            val photoFile = File(requireContext().getExternalFilesDir(null), "photo_${System.currentTimeMillis()}.jpg")
+            cameraPhotoUri = FileProvider.getUriForFile(
+                requireContext(),
+                "${requireContext().packageName}.fileprovider",
+                photoFile
+            )
+            
+            cameraLauncher.launch(cameraPhotoUri)
+        } catch (e: Exception) {
+            Log.e(TAG, "Erro ao abrir câmera: ${e.message}", e)
+            Toast.makeText(requireContext(), "Erro ao abrir câmera", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
+    /**
+     * Abre o seletor de foto da galeria
      * Usa PickVisualMedia que não requer permissões explícitas em Android 13+
      */
-    private fun openPhotoPicker() {
+    private fun openGallery() {
         val request = PickVisualMediaRequest.Builder()
             .setMediaType(ActivityResultContracts.PickVisualMedia.ImageOnly)
             .build()
