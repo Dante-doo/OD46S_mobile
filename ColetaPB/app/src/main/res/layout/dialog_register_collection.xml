@@ -16,32 +16,13 @@
         android:textStyle="bold"
         android:textColor="@android:color/black" />
 
-    <!-- Ponto de coleta (somente leitura) -->
-    <com.google.android.material.textfield.TextInputLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:hint="Ponto de coleta"
-        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-        app:boxStrokeColor="@android:color/darker_gray"
-        app:hintEnabled="true">
-
-        <com.google.android.material.textfield.TextInputEditText
-            android:id="@+id/txtPointName"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:inputType="none"
-            android:focusable="false"
-            android:clickable="false"
-            android:text="Rua X, 123 – Bairro Planalto" />
-    </com.google.android.material.textfield.TextInputLayout>
-
     <!-- Observações (opcional) -->
     <com.google.android.material.textfield.TextInputLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
         android:hint="Observações (opcional)"
+        app:hintEnabled="true"
         style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
 
         <com.google.android.material.textfield.TextInputEditText
@@ -51,8 +32,7 @@
             android:inputType="textMultiLine"
             android:minLines="3"
             android:maxLines="5"
-            android:gravity="top|start"
-            android:hint="Digite observações sobre a coleta..." />
+            android:gravity="top|start" />
     </com.google.android.material.textfield.TextInputLayout>
 
     <!-- Foto (opcional) -->

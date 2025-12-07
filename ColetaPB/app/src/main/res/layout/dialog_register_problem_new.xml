@@ -16,32 +16,14 @@
         android:textStyle="bold"
         android:textColor="@android:color/black" />
 
-    <!-- Ponto de coleta (dropdown) -->
+    <!-- Observações (opcional) -->
     <com.google.android.material.textfield.TextInputLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
-        android:hint="Ponto de coleta"
-        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-        app:boxStrokeColor="@android:color/darker_gray">
-
-        <AutoCompleteTextView
-            android:id="@+id/spinnerPointName"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:inputType="none"
-            android:focusable="false"
-            android:hint="Selecione o ponto" />
-    </com.google.android.material.textfield.TextInputLayout>
-
-    <!-- Descrição do problema (obrigatório) -->
-    <com.google.android.material.textfield.TextInputLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:hint="Descrição do problema *"
-        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-        app:boxStrokeErrorColor="@android:color/holo_red_dark">
+        android:hint="Observações (opcional)"
+        app:hintEnabled="true"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
 
         <com.google.android.material.textfield.TextInputEditText
             android:id="@+id/edtProblemDescription"
@@ -50,8 +32,7 @@
             android:inputType="textMultiLine"
             android:minLines="3"
             android:maxLines="5"
-            android:gravity="top|start"
-            android:hint="Descreva o problema encontrado..." />
+            android:gravity="top|start" />
     </com.google.android.material.textfield.TextInputLayout>
 
     <!-- Foto (opcional) -->

@@ -9,6 +9,7 @@ import android.widget.BaseAdapter
 import android.widget.TextView
 import br.edu.utfpr.coletapb.R
 import br.edu.utfpr.coletapb.data.model.Assignment
+import br.edu.utfpr.coletapb.utils.PeriodicityUtils
 
 class AssignmentAdapter(
     private val context: Context,
@@ -33,6 +34,7 @@ class AssignmentAdapter(
         val tvVehicle = view.findViewById<TextView>(R.id.tvVehicle)
         val tvStatus = view.findViewById<TextView>(R.id.tvStatus)
         val tvBadge = view.findViewById<TextView>(R.id.tvBadge)
+        val tvPeriodicity = view.findViewById<TextView>(R.id.tvPeriodicity)
         
         tvRouteName.text = assignment.routeName ?: "Rota sem nome"
         tvDriver.text = "Motorista: ${assignment.driverName ?: "N/A"}"
@@ -40,7 +42,7 @@ class AssignmentAdapter(
         
         // Status da assignment
         val assignmentStatusText = when (assignment.status) {
-            "ACTIVE" -> "Disponível"
+            "ACTIVE" -> "Ativa"
             "COMPLETED" -> "Concluída"
             "CANCELLED" -> "Cancelada"
             else -> assignment.status
@@ -62,6 +64,23 @@ class AssignmentAdapter(
             tvBadge.setBackgroundColor(Color.parseColor("#4CAF50")) // Verde
         } else {
             tvBadge.visibility = View.GONE
+        }
+        
+        // Exibe periodicity (dias e horários permitidos)
+        if (!assignment.periodicity.isNullOrBlank()) {
+            val periodicityText = PeriodicityUtils.formatPeriodicity(assignment.periodicity)
+            tvPeriodicity.text = "Disponível: $periodicityText"
+            tvPeriodicity.visibility = View.VISIBLE
+            
+            // Verifica se hoje é permitido e muda a cor
+            val isTodayAllowed = PeriodicityUtils.isTodayAllowed(assignment.periodicity)
+            if (isTodayAllowed) {
+                tvPeriodicity.setTextColor(Color.parseColor("#4CAF50")) // Verde se permitido hoje
+            } else {
+                tvPeriodicity.setTextColor(Color.parseColor("#FF9800")) // Laranja se não permitido hoje
+            }
+        } else {
+            tvPeriodicity.visibility = View.GONE
         }
         
         // Clique

@@ -4,6 +4,7 @@ import android.util.Log
 import br.edu.utfpr.coletapb.data.local.SharedPreferencesHelper
 import br.edu.utfpr.coletapb.data.model.Assignment
 import br.edu.utfpr.coletapb.data.remote.RetrofitClient
+import br.edu.utfpr.coletapb.data.repository.ExecutionRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -12,7 +13,17 @@ class AssignmentRepository(private val prefsHelper: SharedPreferencesHelper) {
     suspend fun getMyAssignments(): Result<List<Assignment>> = withContext(Dispatchers.IO) {
         try {
             // Cenário 1: Busca a rota atual (se o motorista já iniciou uma rota)
-            val currentAssignmentResult = getMyCurrentAssignment()
+            // Primeiro verifica se há execução em andamento
+            val executionRepository = ExecutionRepository(prefsHelper)
+            val currentExecutionResult = executionRepository.getMyCurrentExecution()
+            val currentExecution = currentExecutionResult.getOrNull()
+            
+            // Só busca assignment atual se houver execução em andamento
+            val currentAssignmentResult = if (currentExecution != null && currentExecution.status == "IN_PROGRESS") {
+                getMyCurrentAssignment()
+            } else {
+                Result.success(null)
+            }
             val currentAssignment = currentAssignmentResult.getOrNull()
             
             // Cenário 2: Busca todas as escalas ativas disponíveis para o motorista iniciar
@@ -50,6 +61,7 @@ class AssignmentRepository(private val prefsHelper: SharedPreferencesHelper) {
                             startDate = map["startDate"] as? String,
                             endDate = map["endDate"] as? String,
                             frequency = map["frequency"] as? String,
+                            periodicity = (map["route"] as? Map<*, *>)?.get("periodicity") as? String,
                             isCurrent = false // Escalas ativas não são a rota atual
                         )
                     } catch (e: Exception) {
@@ -60,30 +72,50 @@ class AssignmentRepository(private val prefsHelper: SharedPreferencesHelper) {
                 
                 Log.d("AssignmentRepository", "Mapeadas ${assignments.size} escalas ativas com sucesso")
                 
+                // Filtra escalas para garantir que apenas escalas do motorista atual sejam exibidas
+                // Isso previne que escalas antigas (que ainda estão com status ACTIVE) apareçam
+                val currentDriverId = prefsHelper.getDriverId()
+                val filteredAssignments = if (currentDriverId > 0) {
+                    assignments.filter { assignment ->
+                        assignment.driverId == currentDriverId
+                    }.also {
+                        if (it.size < assignments.size) {
+                            Log.d("AssignmentRepository", "Filtradas ${assignments.size - it.size} escalas que não pertencem ao motorista atual (driverId=$currentDriverId)")
+                        }
+                    }
+                } else {
+                    assignments
+                }
+                
                 // Combina a rota atual (se existir) com as escalas ativas disponíveis
                 val allAssignments = mutableListOf<Assignment>()
                 
                 // Cria um conjunto de IDs já adicionados para evitar duplicatas
                 val addedIds = mutableSetOf<Long>()
                 
-                // Se há rota atual, verifica se ela já está na lista de escalas ativas
+                // Se há rota atual, verifica se ela pertence ao motorista atual antes de adicionar
                 if (currentAssignment != null) {
-                    val existingAssignment = assignments.find { it.id == currentAssignment.id }
-                    if (existingAssignment != null) {
-                        // Se já existe na lista, marca como atual e adiciona
-                        allAssignments.add(existingAssignment.copy(isCurrent = true))
-                        addedIds.add(existingAssignment.id)
-                        Log.d("AssignmentRepository", "Rota atual encontrada na lista e marcada como atual")
+                    // Valida que a rota atual pertence ao motorista atual
+                    if (currentDriverId > 0 && currentAssignment.driverId != currentDriverId) {
+                        Log.w("AssignmentRepository", "Rota atual não pertence ao motorista atual (driverId=${currentAssignment.driverId}, esperado=$currentDriverId). Ignorando.")
                     } else {
-                        // Se não existe, adiciona como atual
-                        allAssignments.add(currentAssignment)
-                        addedIds.add(currentAssignment.id)
-                        Log.d("AssignmentRepository", "Adicionada rota atual (não estava na lista de escalas ativas)")
+                        val existingAssignment = filteredAssignments.find { it.id == currentAssignment.id }
+                        if (existingAssignment != null) {
+                            // Se já existe na lista, marca como atual e adiciona
+                            allAssignments.add(existingAssignment.copy(isCurrent = true))
+                            addedIds.add(existingAssignment.id)
+                            Log.d("AssignmentRepository", "Rota atual encontrada na lista e marcada como atual")
+                        } else {
+                            // Se não existe, adiciona como atual
+                            allAssignments.add(currentAssignment)
+                            addedIds.add(currentAssignment.id)
+                            Log.d("AssignmentRepository", "Adicionada rota atual (não estava na lista de escalas ativas)")
+                        }
                     }
                 }
                 
-                // Adiciona todas as escalas ativas que ainda não foram adicionadas
-                assignments.forEach { assignment ->
+                // Adiciona todas as escalas ativas filtradas que ainda não foram adicionadas
+                filteredAssignments.forEach { assignment ->
                     if (!addedIds.contains(assignment.id)) {
                         allAssignments.add(assignment)
                         addedIds.add(assignment.id)
@@ -136,6 +168,7 @@ class AssignmentRepository(private val prefsHelper: SharedPreferencesHelper) {
                             startDate = assignmentData["startDate"] as? String,
                             endDate = assignmentData["endDate"] as? String,
                             frequency = assignmentData["frequency"] as? String,
+                            periodicity = (assignmentData["route"] as? Map<*, *>)?.get("periodicity") as? String,
                             isCurrent = true // Rota retornada por /my-current é a rota atual
                         )
                     } catch (e: Exception) {
@@ -194,6 +227,7 @@ class AssignmentRepository(private val prefsHelper: SharedPreferencesHelper) {
                             startDate = map["startDate"] as? String,
                             endDate = map["endDate"] as? String,
                             frequency = map["frequency"] as? String,
+                            periodicity = (map["route"] as? Map<*, *>)?.get("periodicity") as? String,
                             isCurrent = false
                         )
                     } catch (e: Exception) {

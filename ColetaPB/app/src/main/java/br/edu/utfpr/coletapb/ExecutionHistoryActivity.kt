@@ -24,8 +24,6 @@ class ExecutionHistoryActivity : AppCompatActivity() {
     
     private lateinit var prefsHelper: SharedPreferencesHelper
     private lateinit var listView: ListView
-    private lateinit var tvTitle: TextView
-    private lateinit var btnRefresh: Button
     private var adapter: ExecutionHistoryAdapter? = null
     private var executions: MutableList<Execution> = mutableListOf()
     
@@ -33,34 +31,26 @@ class ExecutionHistoryActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_execution_history)
         
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "Histórico de Rotas"
+        // Remove ActionBar padrão
+        supportActionBar?.hide()
         
         prefsHelper = SharedPreferencesHelper(this)
         
+        // Configura MaterialToolbar
+        val toolbar = findViewById<com.google.android.material.appbar.MaterialToolbar>(R.id.topAppBar)
+        toolbar.title = "Histórico"
+        toolbar.setNavigationOnClickListener {
+            onBackPressedDispatcher.onBackPressed()
+        }
+        
         // Inicializa views
         listView = findViewById(R.id.lvExecutions)
-        tvTitle = findViewById(R.id.tvTitle)
-        btnRefresh = findViewById(R.id.btnRefresh)
-        
-        // Configura título
-        val userType = prefsHelper.getUserType()
-        tvTitle.text = if (userType == "ADMIN") {
-            "Histórico de Execuções"
-        } else {
-            "Minhas Rotas Concluídas"
-        }
         
         // Configura adapter
         adapter = ExecutionHistoryAdapter(this, executions) { execution ->
             onExecutionClick(execution)
         }
         listView.adapter = adapter
-        
-        // Botão refresh
-        btnRefresh.setOnClickListener {
-            loadExecutions()
-        }
         
         // Carrega execuções
         loadExecutions()

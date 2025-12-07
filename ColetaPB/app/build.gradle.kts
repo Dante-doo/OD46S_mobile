@@ -65,6 +65,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.service)
+    // ProcessLifecycleOwner para detectar quando app vai para background/foreground
+    implementation("androidx.lifecycle:lifecycle-process:2.8.7")
     
     // SwipeRefreshLayout
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")

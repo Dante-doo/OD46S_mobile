@@ -1,9 +1,12 @@
 package br.edu.utfpr.coletapb
 
+import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.widget.Button
+import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
@@ -32,6 +35,8 @@ class AssignmentListActivity : AppCompatActivity() {
     private lateinit var listView: ListView
     private lateinit var tvTitle: TextView
     private lateinit var btnRefresh: Button
+    private lateinit var btnLogout: ImageButton
+    private lateinit var llEmptyState: LinearLayout
     private var adapter: AssignmentAdapter? = null
     private var assignments: MutableList<Assignment> = mutableListOf()
     private var isLoadingAssignments = false
@@ -61,10 +66,11 @@ class AssignmentListActivity : AppCompatActivity() {
             )
         }
         
-        // Verifica se está logado
-        val hasToken = prefsHelper.getToken()
-        if (hasToken == null) {
-            Log.w("AssignmentList", "Token não encontrado, redirecionando para login")
+        // Verifica se está logado e se o token é válido (não expirado)
+        val token = prefsHelper.getToken()
+        val isTokenValid = prefsHelper.isTokenValid()
+        if (token == null || !isTokenValid) {
+            Log.w("AssignmentList", "Token não encontrado ou expirado, redirecionando para login")
             val intent = Intent(this, LoginPage::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             }
@@ -77,6 +83,8 @@ class AssignmentListActivity : AppCompatActivity() {
         listView = findViewById(R.id.lvAssignments)
         tvTitle = findViewById(R.id.tvTitle)
         btnRefresh = findViewById(R.id.btnRefresh)
+        btnLogout = findViewById(R.id.btnLogout)
+        llEmptyState = findViewById(R.id.llEmptyState)
         
         // Configura título baseado no tipo de usuário
         val userType = prefsHelper.getUserType()
@@ -96,6 +104,11 @@ class AssignmentListActivity : AppCompatActivity() {
         // Botão refresh
         btnRefresh.setOnClickListener {
             loadAssignments()
+        }
+        
+        // Botão logout
+        btnLogout.setOnClickListener {
+            logout()
         }
         
         // Carrega assignments
@@ -158,12 +171,16 @@ class AssignmentListActivity : AppCompatActivity() {
                         assignments.clear()
                         
                         // Atualiza isCurrent baseado na execução real
+                        // Só marca como atual se a execução estiver realmente em andamento (não cancelada ou concluída)
                         val updatedList = assignmentList.map { assignment ->
                             if (currentExecution != null && 
                                 currentExecution.status == "IN_PROGRESS" &&
                                 currentExecution.assignmentId == assignment.id) {
                                 // Esta assignment tem execução em andamento
                                 assignment.copy(isCurrent = true)
+                            } else if (assignment.isCurrent && (currentExecution == null || currentExecution.status != "IN_PROGRESS")) {
+                                // Remove marcação de "atual" se não há execução em andamento
+                                assignment.copy(isCurrent = false)
                             } else {
                                 // Verifica se há execução concluída hoje para este assignment
                                 val completedResult = executionRepository.getExecutionsByAssignment(assignment.id, "COMPLETED")
@@ -186,13 +203,13 @@ class AssignmentListActivity : AppCompatActivity() {
                         assignments.addAll(updatedList)
                         adapter?.notifyDataSetChanged()
                         
+                        // Atualiza visibilidade do empty state
                         if (assignments.isEmpty()) {
-                            Toast.makeText(
-                                this@AssignmentListActivity,
-                                "Nenhuma rota disponível no momento",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            llEmptyState.visibility = android.view.View.VISIBLE
+                            listView.visibility = android.view.View.GONE
                         } else {
+                            llEmptyState.visibility = android.view.View.GONE
+                            listView.visibility = android.view.View.VISIBLE
                             Log.d("AssignmentList", "Carregadas ${assignments.size} rotas")
                             val activeCount = assignments.count { it.isCurrent }
                             if (activeCount > 0) {
@@ -287,6 +304,32 @@ class AssignmentListActivity : AppCompatActivity() {
     override fun onSupportNavigateUp(): Boolean {
         finish()
         return true
+    }
+    
+    /**
+     * Realiza logout do usuário
+     */
+    private fun logout() {
+        AlertDialog.Builder(this)
+            .setTitle("Sair")
+            .setMessage("Deseja realmente sair?")
+            .setPositiveButton("Sim") { _, _ ->
+                // Limpa token e dados ao fazer logout
+                Log.d("AssignmentList", "Logout solicitado, limpando token e dados")
+                prefsHelper.clearAll()
+                
+                // Para qualquer renovação de token em background
+                (application as? ColetaPBApplication)?.clearTokenOnAppClose()
+                
+                // Navega para tela de login e finaliza esta activity
+                val intent = Intent(this, LoginPage::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                }
+                startActivity(intent)
+                finish()
+            }
+            .setNegativeButton("Não", null)
+            .show()
     }
 }
 

@@ -1,23 +1,19 @@
 package br.edu.utfpr.coletapb.dialog
 
-import android.app.Activity
-import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.location.Location
 import android.net.Uri
 import android.os.Bundle
-import android.provider.MediaStore
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ArrayAdapter
-import android.widget.AutoCompleteTextView
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.fragment.app.DialogFragment
 import br.edu.utfpr.coletapb.R
 import br.edu.utfpr.coletapb.data.model.GpsEventType
@@ -44,7 +40,6 @@ class RegisterProblemDialog : DialogFragment() {
     private var photoFile: File? = null
     
     // Views
-    private lateinit var spinnerPointName: AutoCompleteTextView
     private lateinit var edtProblemDescription: TextInputEditText
     private lateinit var btnAddPhoto: Button
     private lateinit var imgPhotoPreview: ImageView
@@ -92,14 +87,12 @@ class RegisterProblemDialog : DialogFragment() {
         }
     }
     
-    // Launcher para seleção de foto
+    // Launcher para seleção de foto (método moderno que não requer permissões)
     private val photoPickerLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.data?.let { uri ->
-                handlePhotoSelection(uri)
-            }
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        uri?.let {
+            handlePhotoSelection(it)
         }
     }
     
@@ -149,34 +142,11 @@ class RegisterProblemDialog : DialogFragment() {
         super.onViewCreated(view, savedInstanceState)
         
         // Inicializar views
-        spinnerPointName = view.findViewById(R.id.spinnerPointName)
         edtProblemDescription = view.findViewById(R.id.edtProblemDescription)
         btnAddPhoto = view.findViewById(R.id.btnAddPhoto)
         imgPhotoPreview = view.findViewById(R.id.imgPhotoPreview)
         btnCancel = view.findViewById(R.id.btnCancel)
         btnSaveProblem = view.findViewById(R.id.btnSaveProblem)
-        
-        // Configurar spinner de pontos
-        if (availablePoints.isNotEmpty()) {
-            val adapter = ArrayAdapter(
-                requireContext(),
-                android.R.layout.simple_dropdown_item_1line,
-                availablePoints.map { it.name }
-            )
-            spinnerPointName.setAdapter(adapter)
-            
-            // Selecionar ponto atual se disponível
-            currentPointId?.let { pointId ->
-                availablePoints.find { it.id == pointId }?.let { point ->
-                    spinnerPointName.setText(point.name, false)
-                }
-            }
-        } else {
-            // Se não tem lista, usar o ponto atual como texto fixo
-            arguments?.getString("currentPointName")?.let {
-                spinnerPointName.setText(it, false)
-            }
-        }
         
         // Listeners
         btnAddPhoto.setOnClickListener {
@@ -193,11 +163,14 @@ class RegisterProblemDialog : DialogFragment() {
     }
     
     /**
-     * Abre o seletor de foto
+     * Abre o seletor de foto (galeria)
+     * Usa PickVisualMedia que não requer permissões explícitas em Android 13+
      */
     private fun openPhotoPicker() {
-        val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
-        photoPickerLauncher.launch(intent)
+        val request = PickVisualMediaRequest.Builder()
+            .setMediaType(ActivityResultContracts.PickVisualMedia.ImageOnly)
+            .build()
+        photoPickerLauncher.launch(request)
     }
     
     /**
@@ -228,21 +201,11 @@ class RegisterProblemDialog : DialogFragment() {
      * Salva o problema no backend
      */
     private fun saveProblem() {
-        // Validações
+        // Observações são opcionais
         val description = edtProblemDescription.text?.toString()?.trim()
-        if (description.isNullOrEmpty()) {
-            edtProblemDescription.error = "Descrição do problema é obrigatória"
-            return
-        }
         
-        val selectedPointName = spinnerPointName.text?.toString()?.trim()
-        if (selectedPointName.isNullOrEmpty()) {
-            Toast.makeText(requireContext(), "Selecione um ponto de coleta", Toast.LENGTH_SHORT).show()
-            return
-        }
-        
-        // Encontrar pointId selecionado
-        val selectedPointId = availablePoints.find { it.name == selectedPointName }?.id ?: currentPointId
+        // Usa currentPointId diretamente (se disponível)
+        val selectedPointId = currentPointId
         
         if (executionId == null || currentLocation == null) {
             Toast.makeText(requireContext(), "Erro: dados incompletos", Toast.LENGTH_SHORT).show()

@@ -40,15 +40,6 @@
             android:text="Status: COMPLETED"
             android:textSize="14sp"
             android:textColor="@android:color/darker_gray" />
-
-        <TextView
-            android:id="@+id/tvWeight"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Peso: 1.850 kg"
-            android:textSize="12sp"
-            android:textColor="@android:color/darker_gray" />
     </LinearLayout>
 </androidx.cardview.widget.CardView>
 

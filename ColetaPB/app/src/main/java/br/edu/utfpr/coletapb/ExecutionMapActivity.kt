@@ -136,9 +136,9 @@ class ExecutionMapActivity : AppCompatActivity() {
                     
                     tvRouteName.text = routeName
                     
-                    // Atualiza título da toolbar
+                    // Atualiza título da toolbar (sempre "Trajeto")
                     withContext(Dispatchers.Main) {
-                        toolbar.title = routeName
+                        toolbar.title = "Trajeto"
                     }
                 }
             } catch (e: Exception) {

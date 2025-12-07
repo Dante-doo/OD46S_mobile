@@ -8,6 +8,7 @@ import br.edu.utfpr.coletapb.data.model.ExecutionRequest
 import br.edu.utfpr.coletapb.data.remote.RetrofitClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 class ExecutionRepository(private val prefsHelper: SharedPreferencesHelper) {
     
@@ -70,9 +71,33 @@ class ExecutionRepository(private val prefsHelper: SharedPreferencesHelper) {
                     Result.failure(Exception("Resposta vazia do servidor"))
                 }
             } else {
-                val errorMsg = response.errorBody()?.string() ?: "Erro desconhecido"
-                Log.e("ExecutionRepository", "Erro ao iniciar execução: ${response.code()} - $errorMsg")
-                Result.failure(Exception("Erro ao iniciar execução: ${response.code()}"))
+                val errorBody = response.errorBody()?.string() ?: "Erro desconhecido"
+                Log.e("ExecutionRepository", "Erro ao iniciar execução: ${response.code()} - $errorBody")
+                
+                // Tenta extrair a mensagem do JSON de erro do backend
+                val errorMessage = try {
+                    val json = JSONObject(errorBody)
+                    val errorObj = json.optJSONObject("error")
+                    errorObj?.optString("message") ?: json.optString("message") ?: errorBody
+                } catch (e: Exception) {
+                    // Se não conseguir parsear como JSON, usa o corpo do erro diretamente
+                    errorBody
+                }
+                
+                // Trata erro 409 (conflito - execução já existe hoje)
+                if (response.code() == 409) {
+                    val friendlyMessage = if (errorMessage.contains("already exists", ignoreCase = true) || 
+                                             errorMessage.contains("EXECUTION_CONFLICT", ignoreCase = true) ||
+                                             errorMessage.contains("já foi executada", ignoreCase = true)) {
+                        "Esta rota já foi executada hoje. Não é possível iniciar uma nova execução no mesmo dia."
+                    } else {
+                        errorMessage
+                    }
+                    Result.failure(Exception(friendlyMessage))
+                } else {
+                    // Para outros erros (400, 404, etc), retorna a mensagem extraída do backend
+                    Result.failure(Exception(errorMessage))
+                }
             }
         } catch (e: Exception) {
             Log.e("ExecutionRepository", "Exceção ao iniciar execução: ${e.message}", e)

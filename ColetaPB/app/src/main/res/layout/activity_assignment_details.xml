@@ -117,12 +117,12 @@
                 android:visibility="gone" />
 
             <Button
-                android:id="@+id/btnViewSummary"
+                android:id="@+id/btnViewHistory"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Ver Resumo"
-                android:textSize="16sp"
-                android:visibility="gone" />
+                android:layout_marginTop="8dp"
+                android:text="Ver Histórico"
+                android:textSize="16sp" />
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
 

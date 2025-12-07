@@ -50,6 +50,10 @@ class GpsTrackingService : LifecycleService() {
     private var lastSentLocation: Location? = null
     private var lastSentTime: Long = 0L
     
+    // Detecção de movimento: flags para distinguir movimento real de ruído GPS
+    private var isMoving: Boolean = false
+    private var lastMovingLocation: Location? = null // Última localização considerada como movimento real
+    
     companion object {
         private const val TAG = "GpsTrackingService"
         const val ACTION_START_TRACKING = "br.edu.utfpr.coletapb.START_TRACKING"
@@ -66,9 +70,12 @@ class GpsTrackingService : LifecycleService() {
         private const val FASTEST_UPDATE_INTERVAL_MS = 5000L // 5 segundos
         
         // Throttling: condições para enviar ao backend
-        private const val MIN_DISTANCE_METERS = 50.0 // Mínimo 50 metros de movimento
-        private const val MIN_TIME_BETWEEN_SENDS_MS = 30000L // Mínimo 30 segundos entre envios
-        private const val MAX_TIME_BETWEEN_SENDS_MS = 120000L // Máximo 2 minutos (força envio mesmo parado)
+        private const val MIN_DISTANCE_METERS = 10.0 // Mínimo 10 metros de movimento
+        private const val MIN_TIME_BETWEEN_SENDS_MS = 15000L // Mínimo 15 segundos entre envios (mesmo em movimento)
+        private const val MAX_TIME_BETWEEN_SENDS_MS = 60000L // Máximo 1 minuto (força envio mesmo parado)
+        private const val STOPPED_SPEED_THRESHOLD_MS = 1.0 // Velocidade em m/s abaixo da qual considera parado (~3.6 km/h)
+        private const val MIN_MOVEMENT_DISTANCE_METERS = 10.0 // Distância mínima para considerar movimento real (filtra ruído GPS)
+        private const val MIN_MOVEMENT_SPEED_MS = 1.0 // Velocidade mínima em m/s para considerar movimento real
     }
     
     override fun onCreate() {
@@ -85,8 +92,11 @@ class GpsTrackingService : LifecycleService() {
         
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         
+        // Configura LocationRequest para funcionar em background
         locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, UPDATE_INTERVAL_MS)
             .setMinUpdateIntervalMillis(FASTEST_UPDATE_INTERVAL_MS)
+            .setMaxUpdateDelayMillis(UPDATE_INTERVAL_MS * 2) // Permite delay maior em background
+            .setWaitForAccurateLocation(false) // Não espera por localização precisa (mais rápido)
             .build()
         
         locationCallback = object : LocationCallback() {
@@ -127,13 +137,18 @@ class GpsTrackingService : LifecycleService() {
     
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // IMPORTANCE_LOW pode fazer o sistema parar o serviço em algumas versões
+            // Usando IMPORTANCE_DEFAULT para garantir que o serviço continue rodando
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Rastreamento GPS",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
                 description = "Notificação para rastreamento GPS em segundo plano"
                 setShowBadge(false)
+                // Não vibra nem faz som para não incomodar
+                enableVibration(false)
+                setSound(null, null)
             }
             
             val notificationManager = getSystemService(NotificationManager::class.java)
@@ -156,8 +171,9 @@ class GpsTrackingService : LifecycleService() {
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT) // Mudado de LOW para DEFAULT
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setSilent(true) // Não faz som
             .build()
     }
     
@@ -178,27 +194,57 @@ class GpsTrackingService : LifecycleService() {
         backendExecutionId = backendExecId
         lastSentLocation = null
         lastSentTime = 0L
+        isMoving = false
+        lastMovingLocation = null
+        
+        Log.d(TAG, "=== INICIANDO TRACKING ===")
+        Log.d(TAG, "executionLocalId: $executionLocalId")
+        Log.d(TAG, "backendExecutionId recebido: $backendExecutionId")
+        Log.d(TAG, "Token disponível: ${prefsHelper.getToken() != null}")
+        Log.d(TAG, "Online: ${try { syncRepository.isOnline() } catch (e: Exception) { false }}")
         
         // Se não tem backendExecutionId, tenta buscar do banco local
         if (backendExecutionId == null) {
+            Log.w(TAG, "backendExecutionId é null, tentando buscar do banco local...")
             lifecycleScope.launch(Dispatchers.IO) {
                 val execution = executionDao.getById(execId)
                 this@GpsTrackingService.backendExecutionId = execution?.backendId
                 Log.d(TAG, "Backend execution ID obtido do banco: ${this@GpsTrackingService.backendExecutionId}")
+                
+                // Se ainda não tem backendId, tenta buscar novamente após um delay
+                // (pode ter sido criado no backend enquanto o serviço iniciava)
+                if (this@GpsTrackingService.backendExecutionId == null) {
+                    Log.w(TAG, "Ainda não tem backendId, aguardando 2 segundos e tentando novamente...")
+                    kotlinx.coroutines.delay(2000) // Aguarda 2 segundos
+                    val updatedExecution = executionDao.getById(execId)
+                    this@GpsTrackingService.backendExecutionId = updatedExecution?.backendId
+                    Log.d(TAG, "Backend execution ID verificado novamente: ${this@GpsTrackingService.backendExecutionId}")
+                }
             }
+        } else {
+            Log.d(TAG, "Backend execution ID já disponível: $backendExecutionId")
         }
         
         isTracking = true
         
         try {
+            // Usa Looper.getMainLooper() explicitamente para garantir funcionamento em background
             fusedLocationClient.requestLocationUpdates(
                 locationRequest,
                 locationCallback,
-                mainLooper
+                android.os.Looper.getMainLooper()
             )
-            Log.d(TAG, "Rastreamento GPS iniciado para execução local=$executionLocalId, backend=$backendExecutionId")
+            Log.d(TAG, "✅ Rastreamento GPS iniciado com sucesso!")
+            Log.d(TAG, "   - executionLocalId: $executionLocalId")
+            Log.d(TAG, "   - backendExecutionId: $backendExecutionId")
+            Log.d(TAG, "   - LocationRequest: intervalo=${UPDATE_INTERVAL_MS}ms, min=${FASTEST_UPDATE_INTERVAL_MS}ms")
+            Log.d(TAG, "   - Token: ${if (prefsHelper.getToken() != null) "disponível" else "NÃO disponível"}")
+            Log.d(TAG, "   - Online: ${try { syncRepository.isOnline() } catch (e: Exception) { "erro ao verificar" }}")
         } catch (e: SecurityException) {
-            Log.e(TAG, "Erro de permissão ao iniciar rastreamento: ${e.message}")
+            Log.e(TAG, "❌ Erro de permissão ao iniciar rastreamento: ${e.message}")
+            stopSelf()
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Erro inesperado ao iniciar rastreamento: ${e.message}", e)
             stopSelf()
         }
     }
@@ -234,10 +280,29 @@ class GpsTrackingService : LifecycleService() {
     }
     
     private fun onLocationUpdate(location: Location) {
+        Log.d(TAG, "📍 Nova localização recebida: lat=${location.latitude}, lng=${location.longitude}, accuracy=${location.accuracy}m")
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val now = System.currentTimeMillis()
                 val timestamp = System.currentTimeMillis()
+                
+                // Se não tem backendExecutionId ainda, tenta buscar do banco (pode ter sido criado depois)
+                if (backendExecutionId == null) {
+                    Log.w(TAG, "⚠️ backendExecutionId ainda é null, tentando buscar do banco...")
+                    val execution = executionDao.getById(executionLocalId)
+                    if (execution?.backendId != null) {
+                        backendExecutionId = execution.backendId
+                        Log.d(TAG, "✅ Backend execution ID atualizado durante tracking: $backendExecutionId")
+                    } else {
+                        Log.w(TAG, "⚠️ Ainda não tem backendExecutionId no banco. Execução local: $executionLocalId")
+                    }
+                }
+                
+                // ===== DETECÇÃO DE MOVIMENTO REAL (filtra ruído GPS) =====
+                val isMovingNow = detectRealMovement(location)
+                
+                // Verifica se está offline (sem conectividade OU sem backendExecutionId)
+                val isOffline = shouldMarkRecordAsOffline()
                 
                 // Sempre salva localmente para sincronização offline
                 val gpsRecord = GpsRecordLocal(
@@ -246,17 +311,25 @@ class GpsTrackingService : LifecycleService() {
                     lat = location.latitude,
                     lng = location.longitude,
                     eventType = "NORMAL",
-                    isOffline = true
+                    isOffline = isOffline
                 )
                 
                 gpsDao.insert(gpsRecord)
-                Log.d(TAG, "GPS salvo localmente: ${location.latitude}, ${location.longitude}")
+                Log.d(TAG, "GPS salvo localmente: ${location.latitude}, ${location.longitude}, isOffline=$isOffline, backendId=$backendExecutionId, isMoving=$isMovingNow")
                 
                 // Verifica se deve enviar ao backend (throttling inteligente)
-                if (shouldSendToBackend(location, now)) {
+                // Usa lastMovingLocation para cálculo de distância, não lastSentLocation
+                if (shouldSendToBackend(location, now, isMovingNow)) {
                     sendLocationToBackend(location)
                     lastSentLocation = location
                     lastSentTime = now
+                    
+                    // Atualiza lastMovingLocation apenas se for movimento real
+                    if (isMovingNow) {
+                        lastMovingLocation = location
+                    }
+                } else {
+                    Log.d(TAG, "GPS não enviado ao backend (throttling ou condições não atendidas)")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Erro ao processar GPS: ${e.message}", e)
@@ -265,25 +338,114 @@ class GpsTrackingService : LifecycleService() {
     }
     
     /**
-     * Verifica se deve enviar a localização ao backend baseado em:
-     * - Distância mínima desde o último envio (50m)
-     * - Tempo mínimo desde o último envio (30s)
-     * - Tempo máximo desde o último envio (2min - força envio mesmo parado)
+     * Detecta se há movimento real (filtra ruído GPS de 1-2m)
+     * Considera movimento apenas se:
+     * - Distância desde última posição de movimento >= MIN_MOVEMENT_DISTANCE_METERS (10m)
+     * - E velocidade >= MIN_MOVEMENT_SPEED_MS (1 m/s) se disponível
      */
-    private fun shouldSendToBackend(location: Location, currentTime: Long): Boolean {
+    private fun detectRealMovement(newLocation: Location): Boolean {
+        // Primeira localização sempre considera como movimento (para inicializar)
+        if (lastMovingLocation == null) {
+            lastMovingLocation = newLocation
+            isMoving = true
+            Log.d(TAG, "✅ Primeira localização, inicializando detecção de movimento")
+            return true
+        }
+        
+        // Calcula distância desde a última posição de movimento real
+        val distance = lastMovingLocation!!.distanceTo(newLocation)
+        
+        // Verifica velocidade se disponível
+        val hasValidSpeed = newLocation.hasSpeed() && newLocation.speed >= MIN_MOVEMENT_SPEED_MS
+        
+        // Considera movimento real se:
+        // 1. Moveu pelo menos MIN_MOVEMENT_DISTANCE_METERS (10m) desde última posição de movimento
+        // 2. E (tem velocidade válida >= 1 m/s OU distância é significativamente maior que o ruído)
+        val isMovingNow = if (distance >= MIN_MOVEMENT_DISTANCE_METERS) {
+            // Se moveu 10m ou mais, verifica velocidade para confirmar
+            if (hasValidSpeed) {
+                true // Tem velocidade e distância suficiente
+            } else {
+                // Sem velocidade, mas moveu bastante (pode ser GPS impreciso mas movimento real)
+                // Considera movimento se moveu mais que 2x o mínimo (20m)
+                distance >= MIN_MOVEMENT_DISTANCE_METERS * 2
+            }
+        } else {
+            // Moveu menos de 10m - provavelmente ruído GPS
+            false
+        }
+        
+        // Atualiza flag de movimento
+        val wasMoving = isMoving
+        isMoving = isMovingNow
+        
+        if (isMovingNow) {
+            if (!wasMoving) {
+                Log.d(TAG, "🚗 Movimento detectado: distância=${String.format("%.1f", distance)}m, velocidade=${if (newLocation.hasSpeed()) String.format("%.1f", newLocation.speed * 3.6) + "km/h" else "N/A"}")
+            }
+            // Atualiza última posição de movimento apenas quando realmente moveu
+            lastMovingLocation = newLocation
+        } else {
+            if (wasMoving) {
+                Log.d(TAG, "🛑 Parado detectado: distância=${String.format("%.1f", distance)}m (ruído GPS, < ${MIN_MOVEMENT_DISTANCE_METERS}m)")
+            }
+        }
+        
+        return isMovingNow
+    }
+    
+    /**
+     * Define se um registro deve ser marcado como offline.
+     * - Se não tiver conectividade OU não existir backendExecutionId OU não tiver token, considera offline.
+     */
+    private fun shouldMarkRecordAsOffline(): Boolean {
+        return try {
+            val online = syncRepository.isOnline()
+            val hasToken = prefsHelper.getToken() != null
+            !online || backendExecutionId == null || !hasToken
+        } catch (e: Exception) {
+            // Se der erro para checar online, assume offline
+            Log.w(TAG, "Erro ao verificar conectividade: ${e.message}")
+            true
+        }
+    }
+    
+    /**
+     * Verifica se deve enviar a localização ao backend baseado em:
+     * - Distância mínima desde o último envio (10m quando em movimento)
+     * - Quando em movimento: envia quando moveu 10m (sem limitação de tempo)
+     * - Quando parado: envia a cada 1 minuto para manter atualização
+     */
+    private fun shouldSendToBackend(location: Location, currentTime: Long, isMovingNow: Boolean): Boolean {
         // Se não tem backendExecutionId, não envia
         if (backendExecutionId == null) {
+            Log.d(TAG, "Não enviando ao backend: backendExecutionId é null")
+            return false
+        }
+        
+        // Se não tem token, não envia (será sincronizado depois quando o usuário fizer login)
+        val hasToken = prefsHelper.getToken() != null
+        if (!hasToken) {
+            Log.d(TAG, "Não enviando ao backend: token não disponível (usuário precisa fazer login)")
             return false
         }
         
         // Se não está online, não envia (será sincronizado depois)
-        if (!syncRepository.isOnline()) {
+        val isOnline = try {
+            syncRepository.isOnline()
+        } catch (e: Exception) {
+            Log.w(TAG, "Erro ao verificar conectividade: ${e.message}")
+            false
+        }
+        
+        if (!isOnline) {
+            Log.d(TAG, "Não enviando ao backend: offline")
             return false
         }
         
         // Primeira localização sempre envia
         if (lastSentLocation == null) {
-            Log.d(TAG, "Primeira localização, enviando ao backend")
+            Log.d(TAG, "Primeira localização, enviando ao backend: execId=$backendExecutionId")
             return true
         }
         
@@ -291,14 +453,32 @@ class GpsTrackingService : LifecycleService() {
         val distance = lastSentLocation!!.distanceTo(location)
         val timeSinceLastSend = currentTime - lastSentTime
         
-        // Envia se:
-        // 1. Moveu mais de MIN_DISTANCE_METERS E passou mais de MIN_TIME_BETWEEN_SENDS_MS
-        // 2. OU passou mais de MAX_TIME_BETWEEN_SENDS_MS (força envio mesmo parado)
-        val shouldSend = (distance >= MIN_DISTANCE_METERS && timeSinceLastSend >= MIN_TIME_BETWEEN_SENDS_MS) ||
-                        (timeSinceLastSend >= MAX_TIME_BETWEEN_SENDS_MS)
+        // Usa a flag isMovingNow (já calculada com filtro de ruído) em vez de recalcular
+        // Lógica de envio:
+        // 1. Se está em movimento: envia quando moveu 10m desde último envio (sem limitação de tempo)
+        // 2. Se está parado: envia a cada 1 minuto para manter atualização
+        val shouldSend = if (!isMovingNow) {
+            // Parado: envia a cada 1 minuto
+            timeSinceLastSend >= MAX_TIME_BETWEEN_SENDS_MS
+        } else {
+            // Em movimento: envia quando moveu 10m desde último envio (sem verificação de tempo)
+            distance >= MIN_DISTANCE_METERS
+        }
         
         if (shouldSend) {
-            Log.d(TAG, "Condições atendidas para envio: distância=${distance}m, tempo=${timeSinceLastSend}ms")
+            val status = if (!isMovingNow) "parado" else "em movimento"
+            if (!isMovingNow) {
+                Log.d(TAG, "Condições atendidas para envio ($status): tempo=${timeSinceLastSend/1000}s")
+            } else {
+                Log.d(TAG, "Condições atendidas para envio ($status): distância=${String.format("%.1f", distance)}m")
+            }
+        } else {
+            val status = if (!isMovingNow) "parado" else "em movimento"
+            if (!isMovingNow) {
+                Log.d(TAG, "Condições NÃO atendidas ($status): tempo=${timeSinceLastSend/1000}s (max=${MAX_TIME_BETWEEN_SENDS_MS/1000}s)")
+            } else {
+                Log.d(TAG, "Condições NÃO atendidas ($status): distância=${String.format("%.1f", distance)}m (min=${MIN_DISTANCE_METERS}m)")
+            }
         }
         
         return shouldSend
@@ -468,8 +648,10 @@ class GpsTrackingService : LifecycleService() {
     }
     
     override fun onDestroy() {
+        Log.w(TAG, "onDestroy() chamado - isTracking=$isTracking")
         super.onDestroy()
         if (isTracking) {
+            Log.w(TAG, "Serviço sendo destruído mas tracking ainda está ativo! Isso não deveria acontecer.")
             stopTracking()
         }
     }

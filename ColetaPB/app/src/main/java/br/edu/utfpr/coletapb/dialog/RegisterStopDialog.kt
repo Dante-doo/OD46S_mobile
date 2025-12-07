@@ -1,15 +1,19 @@
 package br.edu.utfpr.coletapb.dialog
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.location.Location
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
-import android.widget.RadioButton
-import android.widget.RadioGroup
+import android.widget.ImageView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.fragment.app.DialogFragment
 import br.edu.utfpr.coletapb.R
 import br.edu.utfpr.coletapb.data.model.GpsEventType
@@ -20,6 +24,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 
 /**
  * Dialog para registrar parada (STOP ou BREAK)
@@ -29,12 +35,12 @@ class RegisterStopDialog : DialogFragment() {
     
     private var executionId: Long? = null
     private var currentLocation: Location? = null
+    private var photoFile: File? = null
     
     // Views
-    private lateinit var radioGroupStopType: RadioGroup
-    private lateinit var radioStop: RadioButton
-    private lateinit var radioBreak: RadioButton
     private lateinit var edtObservations: TextInputEditText
+    private lateinit var btnAddPhoto: Button
+    private lateinit var imgPhotoPreview: ImageView
     private lateinit var btnCancel: Button
     private lateinit var btnSaveStop: Button
     
@@ -90,6 +96,15 @@ class RegisterStopDialog : DialogFragment() {
         gpsRepository = GpsRepository(prefsHelper)
     }
     
+    // Launcher para seleção de foto (método moderno que não requer permissões)
+    private val photoPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        uri?.let {
+            handlePhotoSelection(it)
+        }
+    }
+    
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -102,23 +117,58 @@ class RegisterStopDialog : DialogFragment() {
         super.onViewCreated(view, savedInstanceState)
         
         // Inicializar views
-        radioGroupStopType = view.findViewById(R.id.radioGroupStopType)
-        radioStop = view.findViewById(R.id.radioStop)
-        radioBreak = view.findViewById(R.id.radioBreak)
         edtObservations = view.findViewById(R.id.edtObservations)
+        btnAddPhoto = view.findViewById(R.id.btnAddPhoto)
+        imgPhotoPreview = view.findViewById(R.id.imgPhotoPreview)
         btnCancel = view.findViewById(R.id.btnCancel)
         btnSaveStop = view.findViewById(R.id.btnSaveStop)
         
-        // Por padrão, "Parada rápida" (STOP) está selecionado
-        radioStop.isChecked = true
-        
         // Listeners
+        btnAddPhoto.setOnClickListener {
+            openPhotoPicker()
+        }
+        
         btnCancel.setOnClickListener {
             dismiss()
         }
         
         btnSaveStop.setOnClickListener {
             saveStop()
+        }
+    }
+    
+    /**
+     * Abre o seletor de foto (galeria)
+     * Usa PickVisualMedia que não requer permissões explícitas em Android 13+
+     */
+    private fun openPhotoPicker() {
+        val request = PickVisualMediaRequest.Builder()
+            .setMediaType(ActivityResultContracts.PickVisualMedia.ImageOnly)
+            .build()
+        photoPickerLauncher.launch(request)
+    }
+    
+    /**
+     * Processa a seleção de foto
+     */
+    private fun handlePhotoSelection(uri: Uri) {
+        try {
+            val inputStream = requireContext().contentResolver.openInputStream(uri)
+            val bitmap = BitmapFactory.decodeStream(inputStream)
+            inputStream?.close()
+            
+            photoFile = File(requireContext().cacheDir, "photo_${System.currentTimeMillis()}.jpg")
+            FileOutputStream(photoFile).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+            }
+            
+            imgPhotoPreview.setImageBitmap(bitmap)
+            imgPhotoPreview.visibility = View.VISIBLE
+            
+            Toast.makeText(requireContext(), "Foto adicionada", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Log.e(TAG, "Erro ao processar foto: ${e.message}", e)
+            Toast.makeText(requireContext(), "Erro ao processar foto", Toast.LENGTH_SHORT).show()
         }
     }
     
@@ -131,12 +181,8 @@ class RegisterStopDialog : DialogFragment() {
             return
         }
         
-        // Determinar tipo de evento baseado na seleção
-        val eventType = when {
-            radioStop.isChecked -> GpsEventType.STOP
-            radioBreak.isChecked -> GpsEventType.BREAK
-            else -> GpsEventType.STOP // Default
-        }
+        // Usa STOP como tipo padrão (sem seleção de tipo)
+        val eventType = GpsEventType.STOP
         
         val observations = edtObservations.text?.toString()?.trim()
         
@@ -170,7 +216,8 @@ class RegisterStopDialog : DialogFragment() {
                         eventType = eventType.apiValue,
                         isAutomatic = false,
                         isOffline = false,
-                        description = observations
+                        description = observations,
+                        photoFile = photoFile
                     )
                 }
                 

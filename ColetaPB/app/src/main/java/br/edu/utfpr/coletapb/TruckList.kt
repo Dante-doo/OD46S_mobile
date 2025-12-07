@@ -72,23 +72,24 @@ class TruckList : AppCompatActivity() {
         // e não deve verificar login novamente (pode ser falso negativo)
         if (savedInstanceState == null) {
             // Primeira vez criando a Activity
-            val isLoggedIn = prefsHelper.isLoggedIn()
-            val hasToken = prefsHelper.getToken() != null
+            val token = prefsHelper.getToken()
+            val isTokenValid = prefsHelper.isTokenValid()
             
-            Log.d("TruckList", "onCreate - primeira vez - isLoggedIn: $isLoggedIn, hasToken: $hasToken")
+            Log.d("TruckList", "onCreate - primeira vez - token existe: ${token != null}, token válido: $isTokenValid")
             
-            if (!isLoggedIn) {
-                Log.w("TruckList", "Usuário não está logado, redirecionando para login")
+            if (token == null || !isTokenValid) {
+                Log.w("TruckList", "Token não encontrado ou expirado, redirecionando para login")
                 navigateToLogin()
                 return
             }
         } else {
-            // Activity foi recriada - verifica apenas se tem token
-            val hasToken = prefsHelper.getToken() != null
-            Log.d("TruckList", "onCreate - recriada - hasToken: $hasToken")
+            // Activity foi recriada - verifica se token existe e é válido
+            val token = prefsHelper.getToken()
+            val isTokenValid = prefsHelper.isTokenValid()
+            Log.d("TruckList", "onCreate - recriada - token existe: ${token != null}, token válido: $isTokenValid")
             
-            if (!hasToken) {
-                Log.w("TruckList", "Token não encontrado na recriação, redirecionando para login")
+            if (token == null || !isTokenValid) {
+                Log.w("TruckList", "Token não encontrado ou expirado na recriação, redirecionando para login")
                 navigateToLogin()
                 return
             }
@@ -170,8 +171,7 @@ class TruckList : AppCompatActivity() {
     
     override fun onPause() {
         super.onPause()
-        isResumingFromOtherActivity = true // Marca que está indo para outra Activity
-        Log.d("TruckList", "onPause - marcando como resumindo de outra Activity")
+        Log.d("TruckList", "onPause")
     }
     
     override fun onResume() {
@@ -184,6 +184,7 @@ class TruckList : AppCompatActivity() {
         }
         
         // Se está voltando de outra Activity (RouteList, etc), não verifica login
+        // A flag isResumingFromOtherActivity só é setada quando realmente navega para outra Activity
         if (isResumingFromOtherActivity) {
             Log.d("TruckList", "onResume - voltando de outra Activity, não verifica login")
             isResumingFromOtherActivity = false
@@ -191,17 +192,16 @@ class TruckList : AppCompatActivity() {
         }
         
         // Verifica se está logado quando o app volta do background (home, etc)
-        // Mas NÃO redireciona se a Activity foi apenas resumida de outra Activity (RouteList, etc)
-        // Só redireciona se realmente não tiver token (sessão expirada ou logout)
+        // Só redireciona se o token estiver expirado ou não existir
         if (isInitialized) {
-            val hasToken = prefsHelper.getToken() != null
+            val token = prefsHelper.getToken()
+            val isTokenValid = prefsHelper.isTokenValid()
             
-            Log.d("TruckList", "onResume - hasToken: $hasToken (voltando do background)")
+            Log.d("TruckList", "onResume - token existe: ${token != null}, token válido: $isTokenValid (voltando do background)")
             
-            // Só redireciona se realmente não tiver token
-            // Não verifica isLoggedIn() aqui porque pode dar falso negativo quando volta de outra Activity
-            if (!hasToken) {
-                Log.w("TruckList", "Token não encontrado no onResume, redirecionando para login")
+            // Só redireciona se o token não existir OU estiver expirado
+            if (token == null || !isTokenValid) {
+                Log.w("TruckList", "Token não encontrado ou expirado no onResume, redirecionando para login")
                 navigateToLogin()
                 return
             }
@@ -211,6 +211,10 @@ class TruckList : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         gpsMonitor.stopMonitoring()
+        
+        // Não limpa token aqui - apenas quando logout explícito
+        // O token será mantido para permitir GPS tracking em background
+        Log.d("TruckList", "Activity sendo destruída (não limpa token automaticamente)")
     }
 
     private fun observeAssignmentState() {
@@ -306,7 +310,13 @@ class TruckList : AppCompatActivity() {
             .setTitle("Sair")
             .setMessage("Deseja realmente sair?")
             .setPositiveButton("Sim") { _, _ ->
+                // Limpa token e dados ao fazer logout
+                Log.d("TruckList", "Logout solicitado, limpando token e dados")
                 prefsHelper.clearAll()
+                
+                // Para qualquer renovação de token em background
+                (application as? br.edu.utfpr.coletapb.ColetaPBApplication)?.clearTokenOnAppClose()
+                
                 navigateToLogin()
             }
             .setNegativeButton("Não", null)
@@ -322,6 +332,8 @@ class TruckList : AppCompatActivity() {
     }
     
     private fun navigateToAssignmentDetails(assignment: br.edu.utfpr.coletapb.data.model.Assignment) {
+        // Marca que está navegando para outra Activity
+        isResumingFromOtherActivity = true
         val intent = Intent(this, AssignmentDetailsActivity::class.java).apply {
             putExtra("assignment_id", assignment.id)
             putExtra("route_id", assignment.routeId)

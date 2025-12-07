@@ -31,7 +31,6 @@ class ExecutionHistoryAdapter(
         val tvRouteName = view.findViewById<TextView>(R.id.tvRouteName)
         val tvDate = view.findViewById<TextView>(R.id.tvDate)
         val tvStatus = view.findViewById<TextView>(R.id.tvStatus)
-        val tvWeight = view.findViewById<TextView>(R.id.tvWeight)
         
         tvRouteName.text = execution.routeName ?: "Rota sem nome"
         
@@ -52,9 +51,6 @@ class ExecutionHistoryAdapter(
             "CANCELLED" -> "Status: Cancelada"
             else -> "Status: ${execution.status}"
         }
-        
-        // Peso (placeholder - pode vir do backend)
-        tvWeight.text = "Peso: - kg"
         
         // Clique
         view.setOnClickListener {

@@ -75,7 +75,7 @@ interface ApiService {
     @HTTP(method = "PATCH", path = "executions/{id}/cancel", hasBody = true)
     suspend fun cancelExecution(
         @Path("id") executionId: Long,
-        @Body request: Map<String, Any>
+        @Body request: @JvmSuppressWildcards Map<String, Any>
     ): Response<Map<String, Any>>
 
     /**

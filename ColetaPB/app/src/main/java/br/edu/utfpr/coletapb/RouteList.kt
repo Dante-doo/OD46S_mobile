@@ -73,10 +73,11 @@ class RouteList : AppCompatActivity() {
         )[RouteViewModel::class.java]
 
         // Verifica se está logado
-        val hasToken = prefsHelper.getToken() != null
+        val token = prefsHelper.getToken()
+        val isTokenValid = prefsHelper.isTokenValid()
         
-        if (!hasToken) {
-            Log.w("RouteList", "Token não encontrado, redirecionando para login")
+        if (token == null || !isTokenValid) {
+            Log.w("RouteList", "Token não encontrado ou expirado, redirecionando para login")
             val intent = Intent(this, br.edu.utfpr.coletapb.LoginPage::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             }

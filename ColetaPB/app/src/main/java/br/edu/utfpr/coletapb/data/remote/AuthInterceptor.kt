@@ -74,10 +74,23 @@ class AuthInterceptor(private val context: Context) : Interceptor {
                     response = chain.proceed(retryRequest)
                 }
             } else {
-                // Se não conseguiu renovar, apenas loga o erro
-                // NÃO limpa o token automaticamente - o token permanece para tentar novamente
-                // A Activity que receber o erro 401 deve tratar o redirecionamento se necessário
-                Log.e("AuthInterceptor", "Não foi possível renovar o token. Token mantido para tentar novamente.")
+                // Se não conseguiu renovar, verifica se o token está expirado
+                val token = prefsHelper.getToken()
+                if (token != null) {
+                    val isExpired = br.edu.utfpr.coletapb.utils.TokenUtils.isTokenExpired(token)
+                    if (isExpired) {
+                        Log.e("AuthInterceptor", "Token expirado e não foi possível renovar. Limpando token.")
+                        prefsHelper.clearAll()
+                    } else {
+                        // Se o backend retornou 401 e a renovação também falhou com 401,
+                        // significa que o token foi invalidado no backend (revogado, logout, etc.)
+                        // Mesmo que o TokenUtils diga que não está expirado, devemos limpar
+                        // para evitar loops infinitos de requisições falhando
+                        Log.e("AuthInterceptor", "Backend rejeitou o token (401) e renovação falhou. " +
+                                "Token pode ter sido revogado no servidor. Limpando token para forçar novo login.")
+                        prefsHelper.clearAll()
+                    }
+                }
             }
         }
         

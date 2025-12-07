@@ -2,6 +2,7 @@ package br.edu.utfpr.coletapb.data.local
 
 import android.content.Context
 import android.content.SharedPreferences
+import br.edu.utfpr.coletapb.utils.TokenUtils
 
 /**
  * Helper para gerenciar dados locais usando SharedPreferences
@@ -61,8 +62,34 @@ class SharedPreferencesHelper(context: Context) {
     
     fun isLoggedIn(): Boolean {
         val hasFlag = prefs.getBoolean(KEY_IS_LOGGED_IN, false)
-        val hasToken = getToken() != null
-        return hasFlag && hasToken
+        val token = getToken()
+        val hasToken = token != null
+        
+        // Se não tem token ou flag, não está logado
+        if (!hasFlag || !hasToken) {
+            return false
+        }
+        
+        // Verifica se o token está expirado
+        val isExpired = TokenUtils.isTokenExpired(token)
+        if (isExpired) {
+            // Token expirado - limpa os dados
+            clearAll()
+            return false
+        }
+        
+        return true
+    }
+    
+    /**
+     * Verifica se o token está válido (não expirado) sem limpar os dados
+     * Útil para verificar antes de fazer requisições
+     */
+    fun isTokenValid(): Boolean {
+        val token = getToken() ?: return false
+        val isExpired = TokenUtils.isTokenExpired(token)
+        android.util.Log.d("SharedPreferencesHelper", "isTokenValid: token existe=${token.isNotEmpty()}, isExpired=$isExpired")
+        return !isExpired
     }
     
     // Limpar todos os dados (logout)

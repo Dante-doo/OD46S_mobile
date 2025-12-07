@@ -83,12 +83,15 @@
         android:id="@+id/mapContainer"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:elevation="0dp"
         app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
         <org.osmdroid.views.MapView
             android:id="@+id/mapView"
             android:layout_width="match_parent"
-            android:layout_height="match_parent" />
+            android:layout_height="match_parent"
+            android:visibility="visible"
+            android:background="@android:color/transparent" />
 
         <!-- FAB para centralizar no caminhão -->
         <com.google.android.material.floatingactionbutton.FloatingActionButton
@@ -114,12 +117,12 @@
         android:fillViewport="true"
         android:background="@android:color/transparent"
         android:clipToPadding="false"
+        android:elevation="8dp"
         app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
-        app:behavior_peekHeight="250dp"
+        app:behavior_peekHeight="180dp"
         app:behavior_hideable="false"
         app:behavior_skipCollapsed="false"
-        app:behavior_fitToContents="false"
-        app:elevation="12dp">
+        app:behavior_fitToContents="false">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -148,31 +151,84 @@
                 android:orientation="vertical"
                 android:padding="16dp">
 
-                <!-- Título: Próximos pontos -->
+                <!-- 1. Título: Próximos pontos -->
+                <TextView
+                    android:id="@+id/tvNextPointsTitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Próximos pontos"
+                    android:textColor="@color/text_primary"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+
+                <!-- 2. Subtítulo (2 linhas) - para rotas não-CONTAINER -->
                 <LinearLayout
+                    android:id="@+id/llNonContainerInfo"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    android:layout_marginTop="8dp"
+                    android:orientation="vertical"
+                    android:visibility="gone">
 
                     <TextView
-                        android:id="@+id/tvNextPointsTitle"
-                        android:layout_width="0dp"
+                        android:id="@+id/tvNonContainerTitle"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="Próximos pontos"
-                        android:textColor="@color/text_primary"
-                        android:textSize="20sp"
+                        android:text="Rota sem pontos pré-cadastrados"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="14sp"
                         android:textStyle="bold" />
 
                     <TextView
-                        android:id="@+id/tvPointsProgress"
+                        android:id="@+id/tvNonContainerSubtitle"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="(3/18)"
+                        android:layout_marginTop="2dp"
+                        android:text="As coletas serão registradas usando sua localização atual."
                         android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <!-- Contador de progresso (apenas para rotas CONTAINER) -->
+                <TextView
+                    android:id="@+id/tvProgressCounter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="0/12 pontos coletados"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp"
+                    android:visibility="gone" />
+
+                <!-- Estado de todos coletados (apenas para rotas CONTAINER) -->
+                <LinearLayout
+                    android:id="@+id/llAllCollected"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:id="@+id/imgAllCollected"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:text="✓"
+                        android:textSize="36sp"
+                        android:textColor="@color/primary_blue"
+                        android:gravity="center"
+                        android:contentDescription="Todos os pontos coletados" />
+
+                    <TextView
+                        android:id="@+id/tvAllCollected"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="Todos os registros desta rota já foram realizados."
+                        android:textColor="@color/text_primary"
                         android:textSize="16sp"
-                        android:visibility="gone" />
+                        android:gravity="center" />
                 </LinearLayout>
 
                 <!-- Subtítulo: Status da rota (quando não iniciada) -->
@@ -180,36 +236,146 @@
                     android:id="@+id/tvRouteSubtitle"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
+                    android:layout_marginTop="8dp"
                     android:text="Você ainda não iniciou a rota"
                     android:textColor="@color/text_secondary"
                     android:textSize="14sp" />
 
-                <!-- Chip de modo (visível apenas quando iniciada) -->
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chipMode"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="Modo: todas as ruas"
-                    android:visibility="gone"
-                    style="@style/Widget.Material3.Chip.Filter" />
-
-                <!-- Lista de próximos pontos (RecyclerView) -->
+                <!-- Lista de próximos pontos (RecyclerView) - apenas para rotas CONTAINER -->
                 <androidx.recyclerview.widget.RecyclerView
                     android:id="@+id/rvNextPoints"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="16dp"
                     android:nestedScrollingEnabled="false"
+                    android:visibility="gone"
                     tools:listitem="@layout/item_next_point" />
 
-                <!-- Link para ver registros (visível apenas quando iniciada) -->
+                <!-- 3. Botão primário: Registrar coleta (full width, azul) -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btRegisterCollection"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="16dp"
+                    android:text="Registrar coleta"
+                    android:textAllCaps="false"
+                    android:textSize="16sp"
+                    android:textColor="@color/white"
+                    app:cornerRadius="8dp"
+                    style="@style/Widget.Material3.Button"
+                    app:backgroundTint="@color/primary_blue"
+                    android:visibility="gone" />
+
+                <!-- 4. Linha com dois botões secundários lado a lado (outlined) -->
+                <LinearLayout
+                    android:id="@+id/llSecondaryButtons"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="horizontal"
+                    android:baselineAligned="false"
+                    android:gravity="center_vertical"
+                    android:visibility="gone">
+
+                    <!-- Registrar problema: outlined vermelho -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btRegisterProblem"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="8dp"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:text="Registrar problema"
+                        android:textAllCaps="false"
+                        android:textSize="14sp"
+                        android:textColor="@color/error"
+                        android:gravity="center_vertical"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        app:strokeColor="@color/error"
+                        app:strokeWidth="1dp"
+                        app:backgroundTint="@android:color/transparent"
+                        app:icon="@drawable/ic_register_problem"
+                        app:iconTint="@color/error"
+                        app:iconPadding="4dp"
+                        app:iconGravity="textStart"
+                        app:iconSize="18dp"
+                        app:cornerRadius="8dp"
+                        style="@style/Widget.Material3.Button.OutlinedButton" />
+
+                    <!-- Registrar parada: outlined laranja -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btRegisterStop"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:layout_marginStart="8dp"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:text="Registrar parada"
+                        android:textAllCaps="false"
+                        android:textSize="14sp"
+                        android:textColor="@color/orange_500"
+                        android:gravity="center_vertical"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        app:strokeColor="@color/orange_500"
+                        app:strokeWidth="1dp"
+                        app:backgroundTint="@android:color/transparent"
+                        app:icon="@drawable/ic_register_stop"
+                        app:iconTint="@color/orange_500"
+                        app:iconPadding="4dp"
+                        app:iconGravity="textStart"
+                        app:iconSize="18dp"
+                        app:cornerRadius="8dp"
+                        style="@style/Widget.Material3.Button.OutlinedButton" />
+                </LinearLayout>
+
+                <!-- 5. Botão outlined vermelho: Cancelar rota (full width) -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btCancelRoute"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="12dp"
+                    android:text="Cancelar rota"
+                    android:textAllCaps="false"
+                    android:textSize="16sp"
+                    android:textColor="@color/error"
+                    app:strokeColor="@color/error"
+                    app:strokeWidth="1dp"
+                    app:backgroundTint="@android:color/transparent"
+                    app:icon="@android:drawable/ic_menu_delete"
+                    app:iconTint="@color/error"
+                    app:iconPadding="8dp"
+                    app:iconGravity="textStart"
+                    app:cornerRadius="8dp"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:visibility="gone" />
+
+                <!-- 6. Botão outlined neutro: Encerrar rota (full width) -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btFinishRoute"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="12dp"
+                    android:text="Encerrar rota"
+                    android:textAllCaps="false"
+                    android:textSize="16sp"
+                    android:textColor="@color/text_primary"
+                    app:strokeColor="@color/card_border"
+                    app:strokeWidth="1dp"
+                    app:backgroundTint="@android:color/transparent"
+                    app:cornerRadius="8dp"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:visibility="gone" />
+
+                <!-- 7. Link no final: Ver registros da rota → -->
                 <TextView
                     android:id="@+id/tvViewRouteRecords"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
+                    android:layout_marginTop="24dp"
                     android:text="Ver registros da rota →"
                     android:textColor="@color/primary_blue"
                     android:textSize="16sp"
@@ -218,112 +384,8 @@
                     android:focusable="true"
                     android:padding="12dp"
                     android:background="?attr/selectableItemBackground"
-                    android:gravity="center_vertical"
+                    android:gravity="center"
                     android:visibility="gone" />
-
-                <!-- Botões de ação (visíveis apenas quando iniciada E expandido) -->
-                <LinearLayout
-                    android:id="@+id/llActionButtons"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="24dp"
-                    android:orientation="vertical"
-                    android:visibility="gone">
-
-                    <!-- Ação principal: Registrar coleta (cheio, azul, largura total) -->
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btRegisterCollection"
-                        android:layout_width="match_parent"
-                        android:layout_height="56dp"
-                        android:text="Registrar coleta"
-                        android:textAllCaps="false"
-                        android:textSize="16sp"
-                        android:drawableStart="@android:drawable/checkbox_on_background"
-                        android:drawablePadding="8dp"
-                        android:drawableTint="@color/white"
-                        android:textColor="@color/white"
-                        app:cornerRadius="8dp"
-                        style="@style/Widget.Material3.Button"
-                        app:backgroundTint="@color/primary_blue" />
-
-                    <!-- Linha 2: Registrar problema | Registrar parada -->
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:orientation="horizontal">
-
-                        <!-- Registrar problema: outlined vermelho -->
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btRegisterProblem"
-                            android:layout_width="0dp"
-                            android:layout_height="56dp"
-                            android:layout_weight="1"
-                            android:layout_marginEnd="8dp"
-                            android:text="Registrar problema"
-                            android:textAllCaps="false"
-                            android:textSize="16sp"
-                            android:textColor="@color/error"
-                            android:background="@drawable/button_outlined_red"
-                            app:backgroundTint="@android:color/transparent"
-                            app:icon="@android:drawable/ic_dialog_alert"
-                            app:iconTint="@color/error"
-                            app:iconPadding="8dp"
-                            app:iconGravity="textStart"
-                            style="@style/Widget.Material3.Button" />
-
-                        <!-- Registrar parada: outlined laranja -->
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btRegisterStop"
-                            android:layout_width="0dp"
-                            android:layout_height="56dp"
-                            android:layout_weight="1"
-                            android:layout_marginStart="8dp"
-                            android:text="Registrar parada"
-                            android:textAllCaps="false"
-                            android:textSize="16sp"
-                            android:textColor="@color/orange_500"
-                            android:background="@drawable/button_outlined_red"
-                            app:backgroundTint="@android:color/transparent"
-                            app:icon="@android:drawable/ic_menu_recent_history"
-                            app:iconTint="@color/orange_500"
-                            app:iconPadding="8dp"
-                            app:iconGravity="textStart"
-                            style="@style/Widget.Material3.Button" />
-                    </LinearLayout>
-
-                    <!-- Linha 3: Cancelar rota -->
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btCancelRoute"
-                        android:layout_width="match_parent"
-                        android:layout_height="56dp"
-                        android:layout_marginTop="12dp"
-                        android:text="Cancelar rota"
-                        android:textAllCaps="false"
-                        android:textSize="16sp"
-                        android:textColor="@color/error"
-                        android:background="@drawable/button_outlined_red"
-                        app:backgroundTint="@android:color/transparent"
-                        app:icon="@android:drawable/ic_menu_delete"
-                        app:iconTint="@color/error"
-                        app:iconPadding="8dp"
-                        app:iconGravity="textStart"
-                        style="@style/Widget.Material3.Button" />
-
-                    <!-- Encerrar rota: outlined neutro, largura total -->
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btFinishRoute"
-                        android:layout_width="match_parent"
-                        android:layout_height="56dp"
-                        android:layout_marginTop="16dp"
-                        android:text="Encerrar rota"
-                        android:textAllCaps="false"
-                        android:textSize="16sp"
-                        android:textColor="@color/text_primary"
-                        android:background="@drawable/button_outlined_neutral"
-                        app:backgroundTint="@android:color/transparent"
-                        style="@style/Widget.Material3.Button" />
-                </LinearLayout>
             </LinearLayout>
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>

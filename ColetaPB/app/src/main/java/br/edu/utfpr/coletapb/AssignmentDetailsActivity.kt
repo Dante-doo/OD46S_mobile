@@ -19,6 +19,8 @@ import androidx.core.content.ContextCompat
 import android.content.pm.PackageManager
 import com.google.android.material.appbar.MaterialToolbar
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 
 /**
  * Tela que exibe os detalhes de um assignment e permite iniciar/continuar a rota
@@ -45,7 +47,7 @@ class AssignmentDetailsActivity : AppCompatActivity() {
     private lateinit var tvStatus: TextView
     private lateinit var btnStartRoute: Button
     private lateinit var btnContinueRoute: Button
-    private lateinit var btnViewSummary: Button
+    private lateinit var btnViewHistory: Button
     private lateinit var tvExecutorInfo: TextView
     
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -78,7 +80,7 @@ class AssignmentDetailsActivity : AppCompatActivity() {
         
         // Configura MaterialToolbar
         val toolbar = findViewById<MaterialToolbar>(R.id.topAppBar)
-        toolbar.title = routeName
+        toolbar.title = "Rota"
         toolbar.setNavigationOnClickListener {
             onBackPressedDispatcher.onBackPressed()
         }
@@ -90,7 +92,7 @@ class AssignmentDetailsActivity : AppCompatActivity() {
         tvStatus = findViewById(R.id.tvStatus)
         btnStartRoute = findViewById(R.id.btnStartRoute)
         btnContinueRoute = findViewById(R.id.btnContinueRoute)
-        btnViewSummary = findViewById(R.id.btnViewSummary)
+        btnViewHistory = findViewById(R.id.btnViewHistory)
         tvExecutorInfo = findViewById(R.id.tvExecutorInfo)
         
         // Preenche dados
@@ -120,8 +122,8 @@ class AssignmentDetailsActivity : AppCompatActivity() {
             continueRoute()
         }
         
-        btnViewSummary.setOnClickListener {
-            viewSummary()
+        btnViewHistory.setOnClickListener {
+            viewHistory()
         }
         
         // Verifica GPS
@@ -150,7 +152,6 @@ class AssignmentDetailsActivity : AppCompatActivity() {
                                     // Execução em andamento
                                     btnStartRoute.visibility = Button.GONE
                                     btnContinueRoute.visibility = Button.VISIBLE
-                                    btnViewSummary.visibility = Button.GONE
                                     tvStatus.text = "Status: Em andamento"
                                     return@launch
                                 }
@@ -158,7 +159,6 @@ class AssignmentDetailsActivity : AppCompatActivity() {
                                     // Execução concluída
                                     btnStartRoute.visibility = Button.GONE
                                     btnContinueRoute.visibility = Button.GONE
-                                    btnViewSummary.visibility = Button.VISIBLE
                                     tvStatus.text = "Status: Concluída"
                                     return@launch
                                 }
@@ -184,20 +184,10 @@ class AssignmentDetailsActivity : AppCompatActivity() {
                                 }
                                 
                                 if (hasCompletedToday) {
-                                    // Há execução concluída hoje - mostra botão "Ver Resumo"
-                                    val latestExecution = completedExecutions.maxByOrNull { 
-                                        it.startTime ?: ""
-                                    }
-                                    if (latestExecution != null) {
-                                        btnStartRoute.visibility = Button.GONE
-                                        btnContinueRoute.visibility = Button.GONE
-                                        btnViewSummary.visibility = Button.VISIBLE
-                                        tvStatus.text = "Status: Concluída hoje"
-                                        // Salva o ID da execução para o botão "Ver Resumo"
-                                        viewSummaryExecutionId = latestExecution.id
-                                    } else {
-                                        showNotStartedState()
-                                    }
+                                    // Há execução concluída hoje
+                                    btnStartRoute.visibility = Button.GONE
+                                    btnContinueRoute.visibility = Button.GONE
+                                    tvStatus.text = "Status: Concluída hoje"
                                 } else {
                                     // Não há execução concluída hoje
                                     showNotStartedState()
@@ -227,18 +217,9 @@ class AssignmentDetailsActivity : AppCompatActivity() {
                                     } ?: false
                                 }
                                 if (hasCompletedToday) {
-                                    val latestExecution = completedExecutions.maxByOrNull { 
-                                        it.startTime ?: ""
-                                    }
-                                    if (latestExecution != null) {
-                                        btnStartRoute.visibility = Button.GONE
-                                        btnContinueRoute.visibility = Button.GONE
-                                        btnViewSummary.visibility = Button.VISIBLE
-                                        tvStatus.text = "Status: Concluída hoje"
-                                        viewSummaryExecutionId = latestExecution.id
-                                    } else {
-                                        showNotStartedState()
-                                    }
+                                    btnStartRoute.visibility = Button.GONE
+                                    btnContinueRoute.visibility = Button.GONE
+                                    tvStatus.text = "Status: Concluída hoje"
                                 } else {
                                     showNotStartedState()
                                 }
@@ -256,14 +237,10 @@ class AssignmentDetailsActivity : AppCompatActivity() {
         }
     }
     
-    private var viewSummaryExecutionId: Long? = null
-    
     private fun showNotStartedState() {
         btnStartRoute.visibility = Button.VISIBLE
         btnContinueRoute.visibility = Button.GONE
-        btnViewSummary.visibility = Button.GONE
         tvStatus.text = "Status: Não iniciada"
-        viewSummaryExecutionId = null
     }
     
     /**
@@ -308,26 +285,55 @@ class AssignmentDetailsActivity : AppCompatActivity() {
                 result.fold(
                     onSuccess = { execution ->
                         Log.d("AssignmentDetails", "Execução iniciada: ${execution.id}")
-                        Toast.makeText(
-                            this@AssignmentDetailsActivity,
-                            "Rota iniciada com sucesso!",
-                            Toast.LENGTH_SHORT
-                        ).show()
                         
-                        // Navega para a tela de execução
-                        val intent = Intent(this@AssignmentDetailsActivity, StartRoute::class.java).apply {
-                            putExtra("execution_id", execution.id)
-                            putExtra("route_id", execution.routeId)
-                            putExtra("route_name", execution.routeName ?: routeName)
-                        }
-                        startActivity(intent)
-                        finish()
+                        // Mostra modal de sucesso antes de navegar
+                        androidx.appcompat.app.AlertDialog.Builder(this@AssignmentDetailsActivity)
+                            .setTitle("Sucesso")
+                            .setMessage("Rota iniciada com sucesso!")
+                            .setPositiveButton("OK") { _, _ ->
+                                // Navega para a tela de execução
+                                val intent = Intent(this@AssignmentDetailsActivity, StartRoute::class.java).apply {
+                                    putExtra("execution_id", execution.id)
+                                    putExtra("route_id", execution.routeId)
+                                    putExtra("route_name", execution.routeName ?: routeName)
+                                }
+                                startActivity(intent)
+                                finish()
+                            }
+                            .setCancelable(false)
+                            .show()
                     },
                     onFailure = { error ->
                         Log.e("AssignmentDetails", "Erro ao iniciar execução: ${error.message}", error)
                         
-                        // Se o erro for 409 (conflito), verifica se há execução concluída
-                        if (error.message?.contains("409") == true || error.message?.contains("already exists") == true) {
+                        val errorMessage = error.message ?: "Erro desconhecido ao iniciar a rota"
+                        
+                        // Verifica se é erro de periodicity (dia não permitido)
+                        val isPeriodicityError = errorMessage.contains("só pode ser iniciada", ignoreCase = true) ||
+                                                errorMessage.contains("não é um dia permitido", ignoreCase = true) ||
+                                                errorMessage.contains("dia permitido", ignoreCase = true)
+                        
+                        // Se o erro for 409 (conflito - rota já executada hoje)
+                        val isConflictError = errorMessage.contains("já foi executada hoje", ignoreCase = true) ||
+                                             errorMessage.contains("409") == true || 
+                                             errorMessage.contains("already exists", ignoreCase = true) ||
+                                             errorMessage.contains("EXECUTION_CONFLICT", ignoreCase = true)
+                        
+                        if (isPeriodicityError) {
+                            // Mostra mensagem de erro de periodicity com AlertDialog
+                            withContext(Dispatchers.Main) {
+                                androidx.appcompat.app.AlertDialog.Builder(this@AssignmentDetailsActivity)
+                                    .setTitle("Rota não disponível hoje")
+                                    .setMessage(errorMessage)
+                                    .setPositiveButton("OK", null)
+                                    .setCancelable(true)
+                                    .show()
+                                
+                                btnStartRoute.isEnabled = true
+                                btnStartRoute.text = "Iniciar Rota"
+                            }
+                            return@fold
+                        } else if (isConflictError) {
                             // Verifica se há execução concluída para este assignment
                             lifecycleScope.launch {
                                 val completedResult = executionRepository.getExecutionsByAssignment(assignmentId, "COMPLETED")
@@ -353,50 +359,54 @@ class AssignmentDetailsActivity : AppCompatActivity() {
                                                 }
                                                 .maxByOrNull { it.startTime ?: "" }
                                             if (latestExecution != null) {
-                                                viewSummaryExecutionId = latestExecution.id
                                                 btnStartRoute.visibility = Button.GONE
                                                 btnContinueRoute.visibility = Button.GONE
-                                                btnViewSummary.visibility = Button.VISIBLE
                                                 tvStatus.text = "Status: Concluída hoje"
                                                 Toast.makeText(
                                                     this@AssignmentDetailsActivity,
-                                                    "Esta rota já foi executada hoje. Você pode ver o resumo.",
+                                                    "Esta rota já foi executada hoje. Você pode ver o histórico.",
                                                     Toast.LENGTH_LONG
                                                 ).show()
                                             } else {
-                                                Toast.makeText(
-                                                    this@AssignmentDetailsActivity,
-                                                    "Erro ao iniciar rota: ${error.message}",
-                                                    Toast.LENGTH_LONG
-                                                ).show()
+                                                // Mostra mensagem amigável
+                                                androidx.appcompat.app.AlertDialog.Builder(this@AssignmentDetailsActivity)
+                                                    .setTitle("Rota já executada")
+                                                    .setMessage("Esta rota já foi executada hoje. Não é possível iniciar uma nova execução no mesmo dia.\n\nVocê pode visualizar o histórico de execuções.")
+                                                    .setPositiveButton("OK", null)
+                                                    .show()
                                             }
                                         } else {
-                                            Toast.makeText(
-                                                this@AssignmentDetailsActivity,
-                                                "Erro ao iniciar rota: ${error.message}",
-                                                Toast.LENGTH_LONG
-                                            ).show()
+                                            // Mostra mensagem amigável mesmo se não encontrar execução concluída
+                                            androidx.appcompat.app.AlertDialog.Builder(this@AssignmentDetailsActivity)
+                                                .setTitle("Rota já executada")
+                                                .setMessage("Esta rota já foi executada hoje. Não é possível iniciar uma nova execução no mesmo dia.")
+                                                .setPositiveButton("OK", null)
+                                                .show()
                                         }
                                     },
-                                    onFailure = {
-                                        Toast.makeText(
-                                            this@AssignmentDetailsActivity,
-                                            "Erro ao iniciar rota: ${error.message}",
-                                            Toast.LENGTH_LONG
-                                        ).show()
+                                    onFailure = { fetchError ->
+                                        // Se falhar ao buscar execuções, mostra mensagem amigável
+                                        androidx.appcompat.app.AlertDialog.Builder(this@AssignmentDetailsActivity)
+                                            .setTitle("Rota já executada")
+                                            .setMessage("Esta rota já foi executada hoje. Não é possível iniciar uma nova execução no mesmo dia.")
+                                            .setPositiveButton("OK", null)
+                                            .show()
                                     }
                                 )
                             }
                         } else {
-                            Toast.makeText(
-                                this@AssignmentDetailsActivity,
-                                "Erro ao iniciar rota: ${error.message}",
-                                Toast.LENGTH_LONG
-                            ).show()
+                            // Outro tipo de erro - mostra com AlertDialog para melhor visibilidade
+                            withContext(Dispatchers.Main) {
+                                androidx.appcompat.app.AlertDialog.Builder(this@AssignmentDetailsActivity)
+                                    .setTitle("Erro ao iniciar rota")
+                                    .setMessage(errorMessage)
+                                    .setPositiveButton("OK", null)
+                                    .setCancelable(true)
+                                    .show()
+                                btnStartRoute.isEnabled = true
+                                btnStartRoute.text = "Iniciar Rota"
+                            }
                         }
-                        
-                        btnStartRoute.isEnabled = true
-                        btnStartRoute.text = "Iniciar Rota"
                     }
                 )
             } catch (e: Exception) {
@@ -459,78 +469,15 @@ class AssignmentDetailsActivity : AppCompatActivity() {
     }
     
     /**
-     * Visualiza resumo de execução concluída
+     * Navega para a tela de histórico de execuções desta rota
      */
-    private fun viewSummary() {
-        val executionId = viewSummaryExecutionId
-        if (executionId != null) {
-            // Usa o ID da execução concluída que foi salvo
-            val intent = Intent(this@AssignmentDetailsActivity, ExecutionSummaryActivity::class.java).apply {
-                putExtra("execution_id", executionId)
-            }
-            startActivity(intent)
-        } else {
-            // Fallback: tenta buscar execução atual
-            lifecycleScope.launch {
-                try {
-                    val result = executionRepository.getMyCurrentExecution()
-                    
-                    result.fold(
-                        onSuccess = { execution ->
-                            if (execution != null) {
-                                val intent = Intent(this@AssignmentDetailsActivity, ExecutionSummaryActivity::class.java).apply {
-                                    putExtra("execution_id", execution.id)
-                                }
-                                startActivity(intent)
-                            } else {
-                                // Tenta buscar execuções concluídas
-                                val completedResult = executionRepository.getExecutionsByAssignment(assignmentId, "COMPLETED")
-                                completedResult.fold(
-                                    onSuccess = { completedExecutions ->
-                                        val latestExecution = completedExecutions.maxByOrNull { 
-                                            it.startTime ?: ""
-                                        }
-                                        if (latestExecution != null) {
-                                            val intent = Intent(this@AssignmentDetailsActivity, ExecutionSummaryActivity::class.java).apply {
-                                                putExtra("execution_id", latestExecution.id)
-                                            }
-                                            startActivity(intent)
-                                        } else {
-                                            Toast.makeText(
-                                                this@AssignmentDetailsActivity,
-                                                "Execução não encontrada",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        }
-                                    },
-                                    onFailure = {
-                                        Toast.makeText(
-                                            this@AssignmentDetailsActivity,
-                                            "Execução não encontrada",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                )
-                            }
-                        },
-                        onFailure = { error ->
-                            Toast.makeText(
-                                this@AssignmentDetailsActivity,
-                                "Erro ao buscar execução: ${error.message}",
-                                Toast.LENGTH_LONG
-                            ).show()
-                        }
-                    )
-                } catch (e: Exception) {
-                    Log.e("AssignmentDetails", "Exceção ao visualizar resumo: ${e.message}", e)
-                    Toast.makeText(
-                        this@AssignmentDetailsActivity,
-                        "Erro: ${e.message}",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
+    private fun viewHistory() {
+        val intent = Intent(this, AssignmentRouteHistoryActivity::class.java).apply {
+            putExtra("assignment_id", assignmentId)
+            putExtra("route_id", routeId)
+            putExtra("route_name", routeName)
         }
+        startActivity(intent)
     }
     
     override fun onSupportNavigateUp(): Boolean {

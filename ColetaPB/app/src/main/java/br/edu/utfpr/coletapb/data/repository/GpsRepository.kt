@@ -9,6 +9,7 @@ import br.edu.utfpr.coletapb.utils.DateUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import org.json.JSONObject
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -46,8 +47,19 @@ class GpsRepository(private val prefsHelper: SharedPreferencesHelper) {
             val longitudeBody = longitude.toString().toRequestBody("text/plain".toMediaType())
             
             val speedBody = speedKmh?.toString()?.toRequestBody("text/plain".toMediaType())
-            val headingBody = headingDegrees?.toString()?.toRequestBody("text/plain".toMediaType())
-            val accuracyBody = accuracyMeters?.toString()?.toRequestBody("text/plain".toMediaType())
+            // heading_degrees deve ser Integer (sem decimais)
+            val headingBody = headingDegrees?.let { 
+                it.toInt().toString().toRequestBody("text/plain".toMediaType())
+            }
+            // accuracy_meters pode ser Double, mas remove .0 desnecessário se for inteiro
+            val accuracyBody = accuracyMeters?.let {
+                val accuracyValue = if (it % 1.0 == 0.0) {
+                    it.toInt().toString()
+                } else {
+                    it.toString()
+                }
+                accuracyValue.toRequestBody("text/plain".toMediaType())
+            }
             val eventTypeBody = eventType.toRequestBody("text/plain".toMediaType())
             val isAutomaticBody = isAutomatic.toString().toRequestBody("text/plain".toMediaType())
             val isOfflineBody = isOffline.toString().toRequestBody("text/plain".toMediaType())
@@ -133,9 +145,20 @@ class GpsRepository(private val prefsHelper: SharedPreferencesHelper) {
                     Result.failure(Exception("Resposta vazia do servidor"))
                 }
             } else {
-                val errorBody = response.errorBody()?.string()
+                val errorBody = response.errorBody()?.string() ?: "Erro desconhecido"
                 Log.e("GpsRepository", "Erro HTTP ${response.code()}: $errorBody")
-                Result.failure(Exception("Erro ao registrar GPS: ${response.code()} - $errorBody"))
+                
+                // Tenta extrair a mensagem do JSON de erro do backend
+                val errorMessage = try {
+                    val json = org.json.JSONObject(errorBody)
+                    val errorObj = json.optJSONObject("error")
+                    errorObj?.optString("message") ?: json.optString("message") ?: errorBody
+                } catch (e: Exception) {
+                    // Se não conseguir parsear como JSON, usa o corpo do erro diretamente
+                    errorBody
+                }
+                
+                Result.failure(Exception("Erro ao registrar GPS: ${response.code()} - $errorMessage"))
             }
         } catch (e: Exception) {
             Log.e("GpsRepository", "Exceção ao registrar GPS: ${e.message}", e)

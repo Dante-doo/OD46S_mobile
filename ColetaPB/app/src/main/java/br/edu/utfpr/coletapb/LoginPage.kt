@@ -51,6 +51,16 @@ class LoginPage : AppCompatActivity() {
             )
         }
         
+        // Verifica se já está logado e redireciona se necessário
+        val token = prefsHelper.getToken()
+        val isTokenValid = prefsHelper.isTokenValid()
+        if (token != null && isTokenValid) {
+            // Já está logado e token é válido - redireciona para a tela apropriada
+            Log.d("LoginPage", "Token válido encontrado, redirecionando...")
+            checkCurrentExecutionAndNavigate()
+            return
+        }
+        
         // Não redireciona automaticamente - sempre mostra a tela de login
         // O usuário pode fazer logout se necessário
 

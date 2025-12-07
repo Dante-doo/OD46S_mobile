@@ -16,52 +16,52 @@
         android:textStyle="bold"
         android:textColor="@android:color/black" />
 
-    <!-- Tipo de parada (RadioGroup) -->
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="Tipo de parada *"
-        android:textSize="14sp"
-        android:textColor="@android:color/darker_gray" />
-
-    <RadioGroup
-        android:id="@+id/radioGroupStopType"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:orientation="vertical">
-
-        <RadioButton
-            android:id="@+id/radioStop"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Parada rápida"
-            android:checked="true" />
-
-        <RadioButton
-            android:id="@+id/radioBreak"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Intervalo / descanso" />
-    </RadioGroup>
-
     <!-- Observações (opcional) -->
     <com.google.android.material.textfield.TextInputLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
         android:hint="Observações (opcional)"
+        app:hintEnabled="true"
         style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
 
         <com.google.android.material.textfield.TextInputEditText
             android:id="@+id/edtObservations"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:inputType="text"
-            android:hint="Digite observações sobre a parada..." />
+            android:inputType="textMultiLine"
+            android:minLines="3"
+            android:maxLines="5"
+            android:gravity="top|start" />
     </com.google.android.material.textfield.TextInputLayout>
+
+    <!-- Foto (opcional) -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Foto (opcional)"
+        android:textSize="14sp"
+        android:textColor="@android:color/darker_gray" />
+
+    <Button
+        android:id="@+id/btnAddPhoto"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="ADICIONAR FOTO"
+        android:textAllCaps="false"
+        style="@style/Widget.Material3.Button.OutlinedButton" />
+
+    <!-- Preview da foto (oculto inicialmente) -->
+    <ImageView
+        android:id="@+id/imgPhotoPreview"
+        android:layout_width="match_parent"
+        android:layout_height="200dp"
+        android:layout_marginTop="8dp"
+        android:scaleType="centerCrop"
+        android:visibility="gone"
+        android:contentDescription="Preview da foto" />
 
     <!-- Botões -->
     <LinearLayout
