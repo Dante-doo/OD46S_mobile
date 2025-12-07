@@ -168,6 +168,61 @@ class ExecutionRepository(private val prefsHelper: SharedPreferencesHelper) {
         }
     }
     
+    suspend fun getExecutionsByAssignment(assignmentId: Long, status: String? = null): Result<List<Execution>> = withContext(Dispatchers.IO) {
+        try {
+            val response = RetrofitClient.apiService.getExecutions(
+                assignmentId = assignmentId,
+                status = status
+            )
+            
+            if (response.isSuccessful && response.body() != null) {
+                val body = response.body()!!
+                val data = body["data"] as? Map<String, Any>
+                val executionsList = (data?.get("executions") as? List<Map<String, Any>>) ?: emptyList()
+                
+                val executions = executionsList.mapNotNull { execData ->
+                    try {
+                        // O backend retorna assignment dentro de execData
+                        val assignmentData = execData["assignment"] as? Map<*, *>
+                        
+                        Execution(
+                            id = (execData["id"] as? Number)?.toLong() ?: 0L,
+                            assignmentId = (execData["assignmentId"] as? Number)?.toLong()
+                                ?: (assignmentData?.get("id") as? Number)?.toLong()
+                                ?: 0L,
+                            routeId = ((assignmentData?.get("route") as? Map<*, *>)?.get("id") as? Number)?.toLong()
+                                ?: 0L,
+                            routeName = ((assignmentData?.get("route") as? Map<*, *>)?.get("name") as? String),
+                            driverId = ((assignmentData?.get("driver") as? Map<*, *>)?.get("id") as? Number)?.toLong()
+                                ?: 0L,
+                            vehicleId = ((assignmentData?.get("vehicle") as? Map<*, *>)?.get("id") as? Number)?.toLong()
+                                ?: 0L,
+                            status = execData["status"] as? String ?: "UNKNOWN",
+                            startTime = execData["startTime"] as? String,
+                            endTime = execData["endTime"] as? String,
+                            startLat = (execData["startLat"] as? Number)?.toDouble(),
+                            startLng = (execData["startLng"] as? Number)?.toDouble(),
+                            endLat = (execData["endLat"] as? Number)?.toDouble(),
+                            endLng = (execData["endLng"] as? Number)?.toDouble()
+                        )
+                    } catch (e: Exception) {
+                        Log.e("ExecutionRepository", "Erro ao mapear execution: ${e.message}", e)
+                        null
+                    }
+                }
+                
+                Result.success(executions)
+            } else {
+                val errorMsg = response.errorBody()?.string() ?: "Erro desconhecido"
+                Log.e("ExecutionRepository", "Erro ao buscar execuções: ${response.code()} - $errorMsg")
+                Result.failure(Exception("Erro ao buscar execuções: ${response.code()}"))
+            }
+        } catch (e: Exception) {
+            Log.e("ExecutionRepository", "Exceção ao buscar execuções: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+    
     suspend fun getMyCurrentExecution(): Result<Execution?> = withContext(Dispatchers.IO) {
         try {
             val response = RetrofitClient.apiService.getMyCurrentExecution()

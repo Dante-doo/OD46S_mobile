@@ -32,6 +32,7 @@ import br.edu.utfpr.coletapb.data.repository.ExecutionRepository
 import br.edu.utfpr.coletapb.data.repository.GpsRepository
 import br.edu.utfpr.coletapb.data.repository.RouteRepository
 import br.edu.utfpr.coletapb.data.repository.SyncRepository
+import br.edu.utfpr.coletapb.dialog.*
 import br.edu.utfpr.coletapb.service.GpsTrackingService
 import com.google.android.gms.location.*
 import com.google.android.gms.tasks.Tasks
@@ -46,6 +47,7 @@ import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.overlay.Polygon
 import br.edu.utfpr.coletapb.utils.GpsMonitor
+import com.google.android.material.appbar.MaterialToolbar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,6 +67,7 @@ class StartRoute : AppCompatActivity() {
     private lateinit var btStart: Button
     private lateinit var btRegisterCollection: Button
     private lateinit var btRegisterProblem: Button
+    private lateinit var btRegisterStop: Button
     private lateinit var btCancelRoute: Button
     private lateinit var btFinishRoute: Button
     private lateinit var tvRouteName: TextView
@@ -89,6 +92,13 @@ class StartRoute : AppCompatActivity() {
     private lateinit var mapView: MapView
     private var currentLocationMarker: Marker? = null
     private val pointMarkers = mutableListOf<Marker>()
+    
+    // Modo de seguir localização no mapa
+    private var followLocation: Boolean = true
+    
+    // Throttling para atualização de informações (evita atualizar muito frequentemente)
+    private var lastNextPointInfoUpdate: Long = 0L
+    private val NEXT_POINT_INFO_UPDATE_INTERVAL = 2000L // Atualiza a cada 2 segundos
     private var routePolyline: Polyline? = null
     private val routePolygons = mutableListOf<Polygon>()
 
@@ -141,14 +151,21 @@ class StartRoute : AppCompatActivity() {
         // Inicializa RetrofitClient se necessário
         RetrofitClient.init(this)
         
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "Iniciar rota"
-
+        // Remove ActionBar padrão
+        supportActionBar?.hide()
+        
         // extras vindos da RouteList
         routeId = intent.getLongExtra("route_id", 0L)
         assignmentId = intent.getLongExtra("assignment_id", 0L)
         routeName = intent.getStringExtra("route_name")
         routeInfo = intent.getStringExtra("route_info")
+        
+        // Configura MaterialToolbar
+        val toolbar = findViewById<MaterialToolbar>(R.id.topAppBar)
+        toolbar.title = routeName ?: "Iniciar rota"
+        toolbar.setNavigationOnClickListener {
+            onBackPressedDispatcher.onBackPressed()
+        }
 
         // Inicializa componentes do novo layout
         tvRouteName = findViewById(R.id.tvRouteName)
@@ -166,6 +183,7 @@ class StartRoute : AppCompatActivity() {
         btStart = findViewById(R.id.btStart)
         btRegisterCollection = findViewById(R.id.btRegisterCollection)
         btRegisterProblem = findViewById(R.id.btRegisterProblem)
+        btRegisterStop = findViewById(R.id.btRegisterStop)
         btCancelRoute = findViewById(R.id.btCancelRoute)
         btFinishRoute = findViewById(R.id.btFinishRoute)
         fabCenterLocation = findViewById(R.id.fabCenterLocation)
@@ -211,18 +229,21 @@ class StartRoute : AppCompatActivity() {
         // Listener para quando o bottom sheet é arrastado
         bottomSheetBehavior.addBottomSheetCallback(object : com.google.android.material.bottomsheet.BottomSheetBehavior.BottomSheetCallback() {
             override fun onStateChanged(bottomSheet: View, newState: Int) {
+                // Botões de ação agora sempre aparecem quando rota iniciada, independente do estado do bottom sheet
+                // Mantém apenas a lógica de visibilidade do tvViewRouteRecords se necessário
                 when (newState) {
                     com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED -> {
-                        // Quando expandido, mostra botões de ação se rota iniciada
+                        // Quando expandido, mostra lista de pontos se rota iniciada
                         if (routeStarted) {
-                            llActionButtons.visibility = View.VISIBLE
                             tvViewRouteRecords.visibility = View.VISIBLE
                         }
                     }
                     com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED -> {
-                        // Quando colapsado, esconde botões de ação
-                        llActionButtons.visibility = View.GONE
-                        tvViewRouteRecords.visibility = View.GONE
+                        // Quando colapsado, pode esconder lista de pontos
+                        // Mas mantém botões de ação visíveis (gerenciado por applyUiState)
+                        if (routeStarted) {
+                            tvViewRouteRecords.visibility = View.GONE
+                        }
                     }
                     com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_DRAGGING -> {
                         // Durante o arraste (não precisa fazer nada)
@@ -345,6 +366,16 @@ class StartRoute : AppCompatActivity() {
         // Inicializa mapa (OSMDroid) - DEVE ser feito DEPOIS da configuração
         mapView = findViewById(R.id.mapView)
         
+        // Habilita multi-toque e botões de zoom nativos do OSMDroid
+        mapView.setMultiTouchControls(true)
+        mapView.setBuiltInZoomControls(true) // 🔴 importante: ativar os botões de zoom
+        mapView.zoomController.setVisibility(
+            org.osmdroid.views.CustomZoomButtonsController.Visibility.SHOW_AND_FADEOUT
+        )
+        
+        mapView.controller.setZoom(15.0)
+        mapView.setUseDataConnection(true)
+        
         // Configura tile source customizado
         // Tenta usar OpenStreetMap primeiro, se falhar tenta CartoDB
         try {
@@ -376,12 +407,50 @@ class StartRoute : AppCompatActivity() {
             }
         }
         
-        mapView.setMultiTouchControls(true)
-        mapView.controller.setZoom(15.0)
-        mapView.setUseDataConnection(true)
-        
-        // Habilita zoom controls (os controles de zoom já estão habilitados por padrão)
-        // mapView.zoomController.setVisibility(View.VISIBLE) // Opcional: controlar visibilidade
+        // Posiciona os botões de zoom no canto superior direito
+        // COMENTADO: Removido temporariamente para garantir que os botões apareçam na posição padrão
+        /*
+        mapView.postDelayed({
+            try {
+                // O OSMDroid adiciona os botões de zoom como child do mapView
+                // Procura pela view que contém os botões de zoom
+                val mapContainer = findViewById<android.widget.FrameLayout>(R.id.mapContainer)
+                mapContainer?.let { container ->
+                    // Procura por views que possam ser os botões de zoom
+                    for (i in 0 until container.childCount) {
+                        val child = container.getChildAt(i)
+                        // Verifica se é uma view que contém botões (geralmente LinearLayout ou similar)
+                        if (child is android.view.ViewGroup && child.childCount > 0) {
+                            // Verifica se algum child parece ser um botão de zoom
+                            var hasZoomButtons = false
+                            for (j in 0 until child.childCount) {
+                                val grandChild = child.getChildAt(j)
+                                if (grandChild is android.widget.ImageButton || 
+                                    grandChild is android.widget.Button) {
+                                    hasZoomButtons = true
+                                    break
+                                }
+                            }
+                            
+                            if (hasZoomButtons) {
+                                val layoutParams = child.layoutParams as? android.widget.FrameLayout.LayoutParams
+                                if (layoutParams != null) {
+                                    layoutParams.gravity = android.view.Gravity.TOP or android.view.Gravity.END
+                                    val marginPx = (16 * resources.displayMetrics.density).toInt()
+                                    layoutParams.setMargins(0, marginPx, marginPx, 0)
+                                    child.layoutParams = layoutParams
+                                    Log.d("StartRoute", "Botões de zoom posicionados no canto superior direito")
+                                    break
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("StartRoute", "Não foi possível posicionar botões de zoom: ${e.message}")
+            }
+        }, 500) // Delay para garantir que os botões já foram adicionados
+        */
         
         // Configurações adicionais para garantir download de tiles
         mapView.isHorizontalMapRepetitionEnabled = true
@@ -396,6 +465,18 @@ class StartRoute : AppCompatActivity() {
         
         Log.d("StartRoute", "Mapa inicializado - Zoom: ${mapView.zoomLevelDouble}, DataConnection: ${mapView.useDataConnection()}, TileSource: ${mapView.tileProvider.tileSource.name()}")
         
+        // Se o usuário tocar/arrastar o mapa, desliga o followLocation
+        mapView.setOnTouchListener { _, event ->
+            when (event.action) {
+                android.view.MotionEvent.ACTION_DOWN,
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    followLocation = false
+                }
+            }
+            // Deixa o MapView tratar o toque normalmente
+            false
+        }
+        
         // Configura overlay de localização
         setupLocationOverlay()
 
@@ -405,15 +486,18 @@ class StartRoute : AppCompatActivity() {
         // Desenha rota se já estiver carregada
         routeWithPoints?.let { drawRouteOnMap(it) }
 
-        // Verifica se há execução em andamento
-        checkCurrentExecution()
-
-        // Restaura estado
-        routeStarted = savedInstanceState?.getBoolean("route_started") ?: false
+        // Restaura estado básico (mas não marca como iniciada ainda)
         execLocalId = savedInstanceState?.getLong("exec_local_id") ?: 0L
         backendExecutionId = savedInstanceState?.getLong("backend_exec_id")?.takeIf { it > 0 }
         currentPointIndex = savedInstanceState?.getInt("current_point_index") ?: 0
         
+        // NÃO restaura routeStarted do savedInstanceState - sempre verifica no backend primeiro
+        routeStarted = false
+        
+        // Verifica se há execução em andamento (isso vai atualizar routeStarted corretamente)
+        checkCurrentExecution()
+        
+        // Aplica estado inicial (será atualizado após checkCurrentExecution)
         applyUiState()
 
         // Inicializa Activity Result Launcher
@@ -432,13 +516,17 @@ class StartRoute : AppCompatActivity() {
         }
 
         // Listeners
-        btStart.setOnClickListener { onStartRoute() }
-        btRegisterCollection.setOnClickListener { showConfirmCollectionDialog() }
-        btRegisterProblem.setOnClickListener { showRegisterProblemDialog() }
+        btStart.setOnClickListener { showStartRouteDialog() }
+        btRegisterCollection.setOnClickListener { showCollectionDialog() }
+        btRegisterProblem.setOnClickListener { showProblemDialog() }
+        btRegisterStop.setOnClickListener { showRegisterStopDialogNew() }
         btCancelRoute.setOnClickListener { showCancelRouteDialog() }
-        btFinishRoute.setOnClickListener { onFinishRoute() }
+        btFinishRoute.setOnClickListener { showEndRouteDialog() }
         tvViewRouteRecords.setOnClickListener { showRoutePointsList() }
-        fabCenterLocation.setOnClickListener { centerMapOnCurrentLocation() }
+        fabCenterLocation.setOnClickListener {
+            followLocation = true
+            centerMapOnCurrentLocation()
+        }
         
         // Inicia monitoramento contínuo do GPS
         gpsMonitor.startMonitoring {
@@ -524,19 +612,23 @@ class StartRoute : AppCompatActivity() {
         try {
             val locationIcon = ContextCompat.getDrawable(this, R.drawable.my_location_icon)
             locationIcon?.let { drawable ->
-                val size = (32 * resources.displayMetrics.density).toInt() // Menor, mais próximo do Google Maps
+                // Tamanho em DP bem pequeno, similar ao ponto azul do Google
+                val dp = resources.displayMetrics.density
+                val size = (10 * dp).toInt() // antes era 20dp
                 drawable.setBounds(0, 0, size, size)
                 
                 // Não aplica tint, o drawable já tem a cor azul definida
+                // ancora bem no centro do ponto
                 currentLocationMarker?.icon = drawable
                 currentLocationMarker?.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                Log.d("StartRoute", "Marker de localização customizado criado (${size}px, estilo Google Maps)")
+                Log.d("StartRoute", "Marker de localização customizado criado (${size}px, estilo Google Maps menor)")
             } ?: run {
                 // Se não conseguir carregar, usa um drawable simples azul (cor do Google)
-                val size = (32 * resources.displayMetrics.density).toInt()
+                val dp = resources.displayMetrics.density
+                val size = (10 * dp).toInt()
                 val blueCircle = android.graphics.drawable.GradientDrawable().apply {
                     shape = android.graphics.drawable.GradientDrawable.OVAL
-                    setColor(android.graphics.Color.parseColor("#4285F4")) // Azul do Google
+                    setColor(android.graphics.Color.parseColor("#4285F4")) // Azul Google
                     setSize(size, size)
                 }
                 currentLocationMarker?.icon = blueCircle
@@ -547,10 +639,11 @@ class StartRoute : AppCompatActivity() {
             Log.w("StartRoute", "Erro ao criar marker customizado: ${e.message}")
             // Fallback: cria um círculo azul simples (cor do Google)
             try {
-                val size = (32 * resources.displayMetrics.density).toInt()
+                val dp = resources.displayMetrics.density
+                val size = (10 * dp).toInt()
                 val blueCircle = android.graphics.drawable.GradientDrawable().apply {
                     shape = android.graphics.drawable.GradientDrawable.OVAL
-                    setColor(android.graphics.Color.parseColor("#4285F4")) // Azul do Google
+                    setColor(android.graphics.Color.parseColor("#4285F4")) // Azul Google
                     setSize(size, size)
                 }
                 currentLocationMarker?.icon = blueCircle
@@ -585,19 +678,27 @@ class StartRoute : AppCompatActivity() {
             override fun onLocationResult(result: LocationResult) {
                 result.lastLocation?.let { location ->
                     currentLocation = location
+                    // Atualiza marker imediatamente para movimento suave
                     updateLocationMarkerPosition(location)
+                    
+                    // Atualiza informações do próximo ponto com throttling
+                    val now = System.currentTimeMillis()
+                    if (now - lastNextPointInfoUpdate >= NEXT_POINT_INFO_UPDATE_INTERVAL) {
+                        updateNextPointInfo()
+                        lastNextPointInfoUpdate = now
+                    }
                 }
             }
         }
 
-        // Solicita atualizações de localização com intervalo mais curto
+        // Solicita atualizações de localização com intervalo otimizado
         try {
             val locationRequest = LocationRequest.Builder(
                 Priority.PRIORITY_HIGH_ACCURACY,
-                1500L // 1.5 segundos entre updates (intervalo médio)
+                1000L // 1s entre updates (mais estável e menos "nervoso")
             )
-                .setMinUpdateIntervalMillis(800L)      // pode atualizar até ~0.8s
-                .setMaxUpdateDelayMillis(3000L)
+                .setMinUpdateIntervalMillis(500L)      // pode atualizar até ~0.5s para movimento rápido
+                .setMaxUpdateDelayMillis(1500L)         // máximo 1.5 segundos de delay
                 .setWaitForAccurateLocation(false)
                 .build()
 
@@ -631,7 +732,14 @@ class StartRoute : AppCompatActivity() {
         currentLocationMarker?.let { marker ->
             val geoPoint = GeoPoint(location.latitude, location.longitude)
             marker.position = geoPoint
-            mapView.invalidate()
+
+            // Se o modo "seguir" está ligado, anima o mapa para a nova posição
+            if (followLocation) {
+                mapView.controller.animateTo(geoPoint)
+            }
+
+            // Usa postInvalidate para não travar a UI
+            mapView.postInvalidate()
         }
     }
     
@@ -644,6 +752,40 @@ class StartRoute : AppCompatActivity() {
         drawable.setBounds(0, 0, canvas.width, canvas.height)
         drawable.draw(canvas)
         return bitmap
+    }
+    
+    /**
+     * Tenta restaurar a rota a partir do banco local, mesmo sem backendId.
+     * Retorna true se conseguiu restaurar, false caso contrário.
+     */
+    private suspend fun tryRestoreLocalExecutionForCurrentRoute(): Boolean {
+        val currentExec = executionDao.getCurrentExecution()
+        if (currentExec != null &&
+            currentExec.routeId == routeId &&
+            currentExec.status == "IN_PROGRESS"
+        ) {
+            execLocalId = currentExec.localId
+            backendExecutionId = currentExec.backendId // pode ser null, sem problema
+            Log.d("StartRoute", "Rota restaurada do banco local: execLocalId=$execLocalId, backendId=$backendExecutionId, routeId=$routeId")
+            withContext(Dispatchers.Main) {
+                routeStarted = true
+                // Aplica estado da UI primeiro (mostra botões)
+                applyUiState()
+                
+                // Garante que o bottom sheet fica colapsado quando restaura a rota
+                if (::bottomSheetBehavior.isInitialized) {
+                    bottomSheetBehavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED
+                    // Garante que os botões permanecem visíveis mesmo após colapsar
+                    llActionButtons.visibility = View.VISIBLE
+                }
+                
+                if (checkLocationPermissions()) {
+                    startGpsTracking()
+                }
+            }
+            return true
+        }
+        return false
     }
     
     private fun checkCurrentExecution() {
@@ -711,7 +853,15 @@ class StartRoute : AppCompatActivity() {
                                 // Marca como iniciada apenas se houver execução no backend
                                 withContext(Dispatchers.Main) {
                                     routeStarted = true
+                                    // Aplica estado da UI primeiro (mostra botões)
                                     applyUiState()
+                                    
+                                    // Garante que o bottom sheet fica colapsado quando restaura a rota
+                                    if (::bottomSheetBehavior.isInitialized) {
+                                        bottomSheetBehavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED
+                                        // Garante que os botões permanecem visíveis mesmo após colapsar
+                                        llActionButtons.visibility = View.VISIBLE
+                                    }
                                     
                                     // Inicia serviço de rastreamento GPS se tiver permissões
                                     if (checkLocationPermissions()) {
@@ -719,20 +869,28 @@ class StartRoute : AppCompatActivity() {
                                     }
                                 }
                             } else {
-                                // Não há execução no backend para este assignment
-                                Log.d("StartRoute", "Nenhuma execução no backend para este assignment")
+                                // Não há execução no backend para este assignment OU execução é de outro assignment
+                                Log.d("StartRoute", "Nenhuma execução no backend para este assignment (ou execução de outro assignment)")
                                 
-                                // Limpa execução local se existir (pode ser antiga ou incompleta)
-                                val currentExec = executionDao.getCurrentExecution()
-                                if (currentExec != null && currentExec.backendId == null) {
-                                    // Se há execução local sem backendId, pode ser antiga
-                                    // Não marca como iniciada, apenas limpa se necessário
-                                    Log.d("StartRoute", "Execução local sem backendId encontrada, mas não há execução no backend")
-                                }
-                                
-                                withContext(Dispatchers.Main) {
-                                    routeStarted = false
-                                    applyUiState()
+                                // Tenta restaurar do banco local antes de marcar como não iniciada
+                                val restored = tryRestoreLocalExecutionForCurrentRoute()
+                                if (!restored) {
+                                    // Limpa execução local se existir (pode ser antiga ou incompleta)
+                                    val currentExec = executionDao.getCurrentExecution()
+                                    if (currentExec != null) {
+                                        if (currentExec.backendId == null) {
+                                            Log.d("StartRoute", "Execução local sem backendId encontrada, mas não há execução no backend")
+                                        } else if (backendExec != null && backendExec.assignmentId != assignmentId) {
+                                            Log.d("StartRoute", "Execução no backend é de outro assignment (${backendExec.assignmentId} != $assignmentId)")
+                                        }
+                                    }
+                                    
+                                    withContext(Dispatchers.Main) {
+                                        routeStarted = false
+                                        backendExecutionId = null
+                                        execLocalId = 0L
+                                        applyUiState()
+                                    }
                                 }
                             }
                         },
@@ -740,35 +898,60 @@ class StartRoute : AppCompatActivity() {
                             // Erro ao buscar do backend ou não há execução (404)
                             Log.d("StartRoute", "Nenhuma execução no backend ou erro: ${error.message}")
                             
-                            // Não marca como iniciada se não há confirmação do backend
-                            withContext(Dispatchers.Main) {
-                                routeStarted = false
-                                applyUiState()
+                            // Tenta restaurar do banco local antes de marcar como não iniciada
+                            val restored = tryRestoreLocalExecutionForCurrentRoute()
+                            if (!restored) {
+                                // Limpa qualquer execução local antiga que não tenha backendId válido
+                                val currentExec = executionDao.getCurrentExecution()
+                                if (currentExec != null && (currentExec.backendId == null || currentExec.status != "IN_PROGRESS")) {
+                                    Log.d("StartRoute", "Limpando execução local antiga/inválida")
+                                    // Não deleta, apenas não marca como iniciada
+                                }
+                                
+                                // Não marca como iniciada se não há confirmação do backend
+                                withContext(Dispatchers.Main) {
+                                    routeStarted = false
+                                    backendExecutionId = null
+                                    execLocalId = 0L
+                                    applyUiState()
+                                }
                             }
                         }
                     )
                 } else {
                     // Offline ou assignmentId inválido - verifica apenas localmente
-                    // Mas não marca como iniciada se não tiver backendId
-                    val currentExec = executionDao.getCurrentExecution()
-                    if (currentExec != null && currentExec.backendId != null) {
-                        // Há execução local com backendId (foi iniciada antes)
-                        execLocalId = currentExec.localId
-                        backendExecutionId = currentExec.backendId
-                        withContext(Dispatchers.Main) {
-                            routeStarted = true
-                            applyUiState()
-                            
-                            // Inicia serviço de rastreamento GPS se tiver permissões
-                            if (checkLocationPermissions()) {
-                                startGpsTracking()
+                    // Tenta restaurar do banco local mesmo sem backendId
+                    val restored = tryRestoreLocalExecutionForCurrentRoute()
+                    if (!restored) {
+                        // Se não conseguiu restaurar, verifica se há execução local com backendId
+                        val currentExec = executionDao.getCurrentExecution()
+                        if (currentExec != null && currentExec.backendId != null) {
+                            // Há execução local com backendId (foi iniciada antes)
+                            execLocalId = currentExec.localId
+                            backendExecutionId = currentExec.backendId
+                            withContext(Dispatchers.Main) {
+                                routeStarted = true
+                                // Aplica estado da UI primeiro (mostra botões)
+                                applyUiState()
+                                
+                                // Garante que o bottom sheet fica colapsado quando restaura a rota
+                                if (::bottomSheetBehavior.isInitialized) {
+                                    bottomSheetBehavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED
+                                    // Garante que os botões permanecem visíveis mesmo após colapsar
+                                    llActionButtons.visibility = View.VISIBLE
+                                }
+                                
+                                // Inicia serviço de rastreamento GPS se tiver permissões
+                                if (checkLocationPermissions()) {
+                                    startGpsTracking()
+                                }
                             }
-                        }
-                    } else {
-                        // Não há execução local válida ou não tem backendId
-                        withContext(Dispatchers.Main) {
-                            routeStarted = false
-                            applyUiState()
+                        } else {
+                            // Não há execução local válida ou não tem backendId
+                            withContext(Dispatchers.Main) {
+                                routeStarted = false
+                                applyUiState()
+                            }
                         }
                     }
                 }
@@ -782,6 +965,47 @@ class StartRoute : AppCompatActivity() {
         }
     }
 
+    /**
+     * Mostra dialog de iniciar rota (usando novo DialogFragment)
+     */
+    private fun showStartRouteDialog() {
+        if (routeStarted) {
+            Toast.makeText(this, "Rota já está em andamento.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        val location = getCurrentLocation() ?: currentLocation
+        if (location == null) {
+            Toast.makeText(this, "Localização não disponível.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        val routeName = routeWithPoints?.name ?: "Rota"
+        
+        val dialog = StartRouteDialog.newInstance(
+            assignmentId = assignmentId,
+            routeName = routeName,
+            location = location
+        )
+        
+        dialog.onRouteStarted = { executionId ->
+            // Atualizar backendExecutionId e iniciar rota
+            backendExecutionId = executionId
+            routeStarted = true
+            applyUiState()
+            
+            // Iniciar serviço de rastreamento GPS
+            if (checkLocationPermissions()) {
+                startGpsTracking()
+            }
+        }
+        
+        dialog.show(supportFragmentManager, "StartRouteDialog")
+    }
+    
+    /**
+     * Inicia a rota (método antigo - mantido para compatibilidade)
+     */
     private fun onStartRoute() {
         if (routeStarted) return
         
@@ -863,12 +1087,15 @@ class StartRoute : AppCompatActivity() {
                     currentLocation = location
                     location?.let { updateCurrentLocationOnMap(it) }
                     
-                    // Garante que o bottom sheet fica colapsado quando inicia a rota
+                    // Aplica estado da UI primeiro (mostra botões)
+                    applyUiState()
+                    
+                    // Depois garante que o bottom sheet fica colapsado quando inicia a rota
                     if (::bottomSheetBehavior.isInitialized) {
                         bottomSheetBehavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED
+                        // Garante que os botões permanecem visíveis mesmo após colapsar
+                        llActionButtons.visibility = View.VISIBLE
                     }
-                    
-                    applyUiState()
                     Toast.makeText(
                         this@StartRoute,
                         "Rota iniciada! GPS ativo.",
@@ -1071,7 +1298,13 @@ class StartRoute : AppCompatActivity() {
         }
     }
     
-    private fun registerGpsEvent(eventType: String, description: String? = null, pointId: Long? = null) {
+    private fun registerGpsEvent(
+        eventType: String, 
+        description: String? = null, 
+        pointId: Long? = null,
+        collectedWeightKg: Double? = null,
+        pointCondition: String? = null
+    ) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 var location = getCurrentLocation()
@@ -1137,6 +1370,8 @@ class StartRoute : AppCompatActivity() {
                             eventType = eventType,
                             description = description,
                             pointId = pointId,
+                            collectedWeightKg = collectedWeightKg,
+                            pointCondition = pointCondition,
                             isAutomatic = false
                         )
                         
@@ -1195,20 +1430,84 @@ class StartRoute : AppCompatActivity() {
         }
     }
 
-    private fun onFinishRoute() {
-        if (!routeStarted || execLocalId == 0L) return
-
-        AlertDialog.Builder(this)
-            .setTitle("Finalizar Rota")
-            .setMessage("Deseja realmente finalizar esta rota?")
-            .setPositiveButton("Sim") { _, _ ->
-                finishRoute()
-            }
-            .setNegativeButton("Não", null)
-            .show()
+    /**
+     * Mostra dialog de encerrar rota (usando novo DialogFragment)
+     */
+    private fun showEndRouteDialog() {
+        if (!routeStarted || backendExecutionId == null) {
+            Toast.makeText(this, "Não há rota em andamento para encerrar.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        val location = getCurrentLocation() ?: currentLocation
+        if (location == null) {
+            Toast.makeText(this, "Localização não disponível.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        val dialog = EndRouteDialog.newInstance(
+            executionId = backendExecutionId!!,
+            location = location
+        )
+        
+        dialog.onRouteEnded = {
+            // Navegar após encerrar (já implementado em finishRoute)
+            navigateAfterFinish()
+        }
+        
+        dialog.show(supportFragmentManager, "EndRouteDialog")
     }
     
-    private fun finishRoute() {
+    /**
+     * Mostra dialog de confirmar encerramento da rota (método antigo - mantido para compatibilidade)
+     */
+    private fun showConfirmFinishDialog() {
+        if (!routeStarted || (execLocalId == 0L && backendExecutionId == null)) {
+            Toast.makeText(this, "Não há rota em andamento para encerrar.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        val route = routeWithPoints
+        val dialogView = layoutInflater.inflate(R.layout.dialog_confirm_finish, null)
+        
+        val tvRouteName = dialogView.findViewById<TextView>(R.id.tvRouteName)
+        val tvSummary = dialogView.findViewById<TextView>(R.id.tvSummary)
+        val etFinalNotes = dialogView.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.etFinalNotes)
+        
+        tvRouteName.text = "Você deseja encerrar a rota \"${route?.name ?: "Rota"}\"?"
+        
+        // Calcula resumo parcial (pode ser melhorado com dados reais)
+        val pointsVisited = route?.collectionPoints?.count { it.status != PointStatus.PENDING } ?: 0
+        val totalPoints = route?.collectionPoints?.size ?: 0
+        val problems = route?.collectionPoints?.count { it.status == PointStatus.PROBLEM } ?: 0
+        
+        // TODO: Calcular duração real
+        tvSummary.text = "• Pontos visitados: $pointsVisited / $totalPoints\n" +
+                "• Problemas: $problems\n" +
+                "• Duração: Calculando..."
+        
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .create()
+        
+        dialogView.findViewById<Button>(R.id.btCancelFinish).setOnClickListener {
+            dialog.dismiss()
+        }
+        
+        dialogView.findViewById<Button>(R.id.btConfirmFinish).setOnClickListener {
+            val notes = etFinalNotes.text.toString().trim()
+            finishRoute(notes)
+            dialog.dismiss()
+        }
+        
+        dialog.show()
+    }
+    
+    private fun onFinishRoute() {
+        showConfirmFinishDialog()
+    }
+    
+    private fun finishRoute(finalNotes: String? = null) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 // Para o rastreamento GPS
@@ -1243,11 +1542,18 @@ class StartRoute : AppCompatActivity() {
 
                     // Tenta finalizar no backend se online
                     if (backendExecutionId != null && syncRepository.isOnline()) {
-                        executionRepository.completeExecution(
+                        val completeResult = executionRepository.completeExecution(
                             executionId = backendExecutionId!!,
                             endLat = lat,
-                            endLng = lng
+                            endLng = lng,
+                            notes = finalNotes
                         )
+                        
+                        // Se falhar, apenas loga o erro mas continua (já salvou localmente)
+                        completeResult.onFailure { error ->
+                            Log.w("StartRoute", "Erro ao finalizar execução no backend: ${error.message}")
+                            // Não bloqueia o fluxo - a execução já foi salva localmente
+                        }
                     }
                 }
 
@@ -1271,18 +1577,50 @@ class StartRoute : AppCompatActivity() {
                         }
                     }
 
-                    Toast.makeText(this@StartRoute, msg, Toast.LENGTH_LONG).show()
-                    finish() // volta para a lista
+                    Toast.makeText(this@StartRoute, msg, Toast.LENGTH_SHORT).show()
+                    
+                    // Navega para a tela de resumo da execução ou lista de assignments
+                    navigateAfterFinish()
                 }
             } catch (e: Exception) {
+                Log.e("StartRoute", "Erro ao finalizar rota: ${e.message}", e)
                 withContext(Dispatchers.Main) {
+                    // Mesmo com erro, tenta navegar (dados já foram salvos localmente)
                     Toast.makeText(
                         this@StartRoute,
-                        "Erro ao finalizar rota: ${e.message}",
+                        "Rota finalizada localmente. ${if (e.message != null) "Erro ao sincronizar: ${e.message}" else ""}",
                         Toast.LENGTH_LONG
                     ).show()
+                    navigateAfterFinish()
                 }
             }
+        }
+    }
+    
+    /**
+     * Navega para a tela apropriada após finalizar a rota
+     */
+    private fun navigateAfterFinish() {
+        try {
+            if (backendExecutionId != null) {
+                // Navega para resumo da execução
+                val intent = Intent(this, ExecutionSummaryActivity::class.java).apply {
+                    putExtra("execution_id", backendExecutionId)
+                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                startActivity(intent)
+            } else {
+                // Se não tem backendId, volta para lista de assignments
+                val intent = Intent(this, AssignmentListActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                startActivity(intent)
+            }
+            finish()
+        } catch (e: Exception) {
+            Log.e("StartRoute", "Erro ao navegar após finalizar: ${e.message}", e)
+            // Se falhar, pelo menos fecha a tela atual
+            finish()
         }
     }
 
@@ -1306,6 +1644,10 @@ class StartRoute : AppCompatActivity() {
             result.onSuccess { route ->
                 routeWithPoints = route
                 withContext(Dispatchers.Main) {
+                    // Atualiza título da toolbar com o nome da rota
+                    val toolbar = findViewById<MaterialToolbar>(R.id.topAppBar)
+                    toolbar.title = route.name ?: routeName ?: "Iniciar rota"
+                    
                     // Desenha no mapa
                     drawRouteOnMap(route)
                     updateNextPointInfo()
@@ -1588,8 +1930,11 @@ class StartRoute : AppCompatActivity() {
     private fun centerMapOnCurrentLocation() {
         currentLocation?.let { loc ->
             val geoPoint = GeoPoint(loc.latitude, loc.longitude)
+            // Não força zoom toda vez; só ajusta se estiver muito longe
+            if (mapView.zoomLevelDouble < 15.0) {
+                mapView.controller.setZoom(16.0)
+            }
             mapView.controller.animateTo(geoPoint)
-            mapView.controller.setZoom(16.0)
         } ?: run {
             Toast.makeText(this, "Localização não disponível", Toast.LENGTH_SHORT).show()
         }
@@ -1598,14 +1943,61 @@ class StartRoute : AppCompatActivity() {
     private fun updateCurrentLocationOnMap(location: Location) {
         currentLocation = location
         
-        // Atualiza o marker customizado se existir
+        // Atualiza o marker customizado se existir (sempre atualiza para movimento suave)
         updateLocationMarkerPosition(location)
         
-        // Atualiza o marker de localização customizado
-        // Apenas atualiza a distância até próximo ponto
-        updateNextPointInfo()
+        // Atualiza informações do próximo ponto com throttling (evita processamento excessivo)
+        val now = System.currentTimeMillis()
+        if (now - lastNextPointInfoUpdate >= NEXT_POINT_INFO_UPDATE_INTERVAL) {
+            updateNextPointInfo()
+            lastNextPointInfoUpdate = now
+        }
     }
     
+    /**
+     * Mostra dialog de registrar coleta (usando novo DialogFragment)
+     */
+    private fun showCollectionDialog() {
+        if (!routeStarted || backendExecutionId == null) {
+            Toast.makeText(this, "Inicie a rota primeiro.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        val route = routeWithPoints ?: return
+        val point = route.collectionPoints.getOrNull(currentPointIndex)
+        val location = getCurrentLocation() ?: currentLocation
+        
+        if (location == null) {
+            Toast.makeText(this, "Localização não disponível.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        if (point == null) {
+            Toast.makeText(this, "Não há ponto atual para registrar coleta.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        val dialog = RegisterCollectionDialog.newInstance(
+            executionId = backendExecutionId!!,
+            pointId = point.id,
+            pointName = "Ponto ${point.sequenceOrder} – ${point.address}",
+            location = location
+        )
+        
+        dialog.onCollectionSaved = { recordId ->
+            // Atualizar UI após coleta salva
+            point.status = PointStatus.COLLECTED
+            currentPointIndex++
+            updateNextPointInfo()
+            drawRouteOnMap(route)
+        }
+        
+        dialog.show(supportFragmentManager, "RegisterCollectionDialog")
+    }
+    
+    /**
+     * Mostra dialog de confirmar coleta (método antigo - mantido para compatibilidade)
+     */
     private fun showConfirmCollectionDialog() {
         val route = routeWithPoints ?: return
         if (currentPointIndex >= route.collectionPoints.size) {
@@ -1619,11 +2011,12 @@ class StartRoute : AppCompatActivity() {
         val tvAddress = dialogView.findViewById<TextView>(R.id.tvCollectionPointAddress)
         tvAddress.text = "Você coletou no ponto ${point.sequenceOrder} – ${point.address}?"
         
-        val etVolume = dialogView.findViewById<AutoCompleteTextView>(R.id.etVolume)
-        val volumeOptions = arrayOf("Baixo", "Médio", "Alto")
-        val volumeAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, volumeOptions)
-        etVolume.setAdapter(volumeAdapter)
-        
+        val etWeight = dialogView.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.etWeight)
+        val etPointCondition = dialogView.findViewById<AutoCompleteTextView>(R.id.etPointCondition)
+        val conditionOptions = arrayOf("NORMAL", "SATURATED", "DAMAGED", "INACCESSIBLE")
+        val conditionAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, conditionOptions)
+        etPointCondition.setAdapter(conditionAdapter)
+
         val etObservation = dialogView.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.etObservation)
         
         val dialog = AlertDialog.Builder(this)
@@ -1635,16 +2028,26 @@ class StartRoute : AppCompatActivity() {
         }
         
         dialogView.findViewById<Button>(R.id.btConfirm).setOnClickListener {
-            val volume = etVolume.text.toString()
-            val observation = etObservation.text.toString()
-            confirmCollection(point, volume, observation)
+            val weightText = etWeight.text.toString().trim()
+            val weight = if (weightText.isNotEmpty()) {
+                try {
+                    weightText.toDouble()
+                } catch (e: NumberFormatException) {
+                    null
+                }
+            } else null
+            
+            val condition = etPointCondition.text.toString().trim().takeIf { it.isNotEmpty() }
+            val observation = etObservation.text.toString().trim().takeIf { it.isNotEmpty() }
+            
+            confirmCollection(point, weight, condition, observation)
             dialog.dismiss()
         }
         
         dialog.show()
     }
     
-    private fun confirmCollection(point: CollectionPoint, volume: String, observation: String?) {
+    private fun confirmCollection(point: CollectionPoint, weightKg: Double? = null, condition: String? = null, observation: String? = null) {
         // Verifica GPS antes de registrar coleta
         if (!gpsMonitor.isGpsEnabled()) {
             gpsMonitor.showGpsDisabledWarning()
@@ -1691,14 +2094,22 @@ class StartRoute : AppCompatActivity() {
                     }
                 }
                 
-                val description = buildString {
-                    append("Coleta realizada")
-                    if (volume.isNotEmpty()) append(" - Volume: $volume")
-                    if (!observation.isNullOrEmpty()) append(" - Obs: $observation")
-                }
+                // Monta descrição com informações adicionais
+                val fullDescription = buildString {
+                    observation?.let { append(it) }
+                    if (condition != null) {
+                        if (isNotEmpty()) append(" | ")
+                        append("Condição: $condition")
+                    }
+                }.takeIf { it.isNotEmpty() } ?: "Coleta realizada"
                 
-                // Registra evento GPS
-                registerGpsEvent("POINT_COLLECTED", description, point.id)
+                registerGpsEvent(
+                    eventType = "POINT_COLLECTED",
+                    description = fullDescription,
+                    pointId = point.id,
+                    collectedWeightKg = weightKg,
+                    pointCondition = condition
+                )
                 
                 // Atualiza status do ponto
                 point.status = PointStatus.COLLECTED
@@ -1719,6 +2130,50 @@ class StartRoute : AppCompatActivity() {
         }
     }
     
+    /**
+     * Mostra dialog de registrar problema (usando novo DialogFragment)
+     */
+    private fun showProblemDialog() {
+        if (!routeStarted || backendExecutionId == null) {
+            Toast.makeText(this, "Inicie a rota primeiro.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        val route = routeWithPoints ?: return
+        val currentPoint = route.collectionPoints.getOrNull(currentPointIndex)
+        val location = getCurrentLocation() ?: currentLocation
+        
+        if (location == null) {
+            Toast.makeText(this, "Localização não disponível.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        // Criar lista de pontos disponíveis
+        val availablePoints = route.collectionPoints.map { point ->
+            RegisterProblemDialog.PointOption(
+                id = point.id,
+                name = "Ponto ${point.sequenceOrder} – ${point.address}"
+            )
+        }
+        
+        val dialog = RegisterProblemDialog.newInstance(
+            executionId = backendExecutionId!!,
+            currentPointId = currentPoint?.id,
+            currentPointName = currentPoint?.let { "Ponto ${it.sequenceOrder} – ${it.address}" },
+            location = location,
+            availablePoints = availablePoints
+        )
+        
+        dialog.onProblemSaved = { recordId ->
+            Toast.makeText(this, "Problema registrado com sucesso!", Toast.LENGTH_SHORT).show()
+        }
+        
+        dialog.show(supportFragmentManager, "RegisterProblemDialog")
+    }
+    
+    /**
+     * Mostra dialog de registrar problema (método antigo - mantido para compatibilidade)
+     */
     private fun showRegisterProblemDialog() {
         // Verifica GPS antes de registrar problema
         if (!gpsMonitor.isGpsEnabled()) {
@@ -1782,6 +2237,136 @@ class StartRoute : AppCompatActivity() {
         }
         
         dialog.show()
+    }
+    
+    /**
+     * Mostra dialog para registrar parada (usando novo DialogFragment)
+     */
+    private fun showRegisterStopDialogNew() {
+        if (!routeStarted || backendExecutionId == null) {
+            Toast.makeText(this, "Inicie a rota primeiro.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        val location = getCurrentLocation() ?: currentLocation
+        if (location == null) {
+            Toast.makeText(this, "Localização não disponível.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        val dialog = RegisterStopDialog.newInstance(
+            executionId = backendExecutionId!!,
+            location = location
+        )
+        
+        dialog.onStopSaved = { recordId ->
+            Toast.makeText(this, "Parada registrada com sucesso!", Toast.LENGTH_SHORT).show()
+        }
+        
+        dialog.show(supportFragmentManager, "RegisterStopDialog")
+    }
+    
+    /**
+     * Mostra dialog para registrar parada (LUNCH, FUEL, BREAK, etc) - método antigo
+     */
+    private fun showRegisterStopDialog() {
+        // Verifica GPS antes de registrar parada
+        if (!gpsMonitor.isGpsEnabled()) {
+            gpsMonitor.showGpsDisabledWarning()
+            return
+        }
+        
+        val dialogView = layoutInflater.inflate(R.layout.dialog_register_stop, null)
+        
+        val tilDescription = dialogView.findViewById<com.google.android.material.textfield.TextInputLayout>(R.id.tilStopDescription)
+        val etDescription = dialogView.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.etStopDescription)
+        val btConfirm = dialogView.findViewById<Button>(R.id.btConfirmStop)
+        
+        var selectedStopType: String? = null
+        
+        dialogView.findViewById<Button>(R.id.btStopLunch).setOnClickListener {
+            selectedStopType = "LUNCH"
+            tilDescription.visibility = View.VISIBLE
+            btConfirm.visibility = View.VISIBLE
+        }
+        
+        dialogView.findViewById<Button>(R.id.btStopFuel).setOnClickListener {
+            selectedStopType = "FUEL"
+            tilDescription.visibility = View.VISIBLE
+            btConfirm.visibility = View.VISIBLE
+        }
+        
+        dialogView.findViewById<Button>(R.id.btStopBreak).setOnClickListener {
+            selectedStopType = "BREAK"
+            tilDescription.visibility = View.VISIBLE
+            btConfirm.visibility = View.VISIBLE
+        }
+        
+        dialogView.findViewById<Button>(R.id.btStopOther).setOnClickListener {
+            selectedStopType = "OTHER"
+            tilDescription.visibility = View.VISIBLE
+            tilDescription.hint = "Descreva a parada"
+            btConfirm.visibility = View.VISIBLE
+        }
+        
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .create()
+        
+        dialogView.findViewById<Button>(R.id.btCancelStop).setOnClickListener {
+            dialog.dismiss()
+        }
+        
+        btConfirm.setOnClickListener {
+            if (selectedStopType == null) {
+                Toast.makeText(this, "Por favor, selecione um tipo de parada.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            
+            val description = etDescription.text.toString().trim()
+            val eventType = selectedStopType!!
+            val finalDescription = when (eventType) {
+                "LUNCH" -> description.ifBlank { "Parada para almoço" }
+                "FUEL" -> description.ifBlank { "Parada para abastecimento" }
+                "BREAK" -> description.ifBlank { "Pausa" }
+                else -> description.ifBlank { "Parada" }
+            }
+            
+            registerStop(eventType, finalDescription)
+            dialog.dismiss()
+        }
+        
+        dialog.show()
+    }
+    
+    /**
+     * Registra uma parada (LUNCH, FUEL, BREAK, etc)
+     */
+    private fun registerStop(eventType: String, description: String) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // Registra evento GPS
+                registerGpsEvent(eventType, description)
+                
+                withContext(Dispatchers.Main) {
+                    val stopTypeText = when (eventType) {
+                        "LUNCH" -> "Almoço"
+                        "FUEL" -> "Abastecimento"
+                        "BREAK" -> "Pausa"
+                        else -> "Parada"
+                    }
+                    Toast.makeText(
+                        this@StartRoute,
+                        "Parada registrada: $stopTypeText",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@StartRoute, "Erro ao registrar parada: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
     
     private fun registerProblem(point: CollectionPoint, description: String) {
@@ -1898,22 +2483,13 @@ class StartRoute : AppCompatActivity() {
     
     private fun applyUiState() {
         if (routeStarted) {
-            // Rota iniciada - mostra informações e botões quando expandido
+            // Rota iniciada - mostra informações e botões de ação
             btStart.visibility = View.GONE
             llRouteStatus.visibility = View.VISIBLE
             chipMode.visibility = View.VISIBLE
             tvRouteSubtitle.visibility = View.GONE
-            
-            // Botões de ação aparecem apenas quando expandido (gerenciado pelo listener)
-            if (::bottomSheetBehavior.isInitialized) {
-                llActionButtons.visibility = if (bottomSheetBehavior.state == com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED) {
-                    View.VISIBLE
-                } else {
-                    View.GONE
-                }
-            } else {
-                llActionButtons.visibility = View.GONE
-            }
+            llActionButtons.visibility = View.VISIBLE // Sempre mostra botões quando rota iniciada
+            tvViewRouteRecords.visibility = View.VISIBLE
             
             tvStatus.text = "Em andamento"
             supportActionBar?.title = routeName ?: "Rota em andamento"

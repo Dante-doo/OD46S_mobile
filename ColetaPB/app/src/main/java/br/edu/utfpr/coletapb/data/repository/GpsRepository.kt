@@ -5,6 +5,7 @@ import br.edu.utfpr.coletapb.data.local.SharedPreferencesHelper
 import br.edu.utfpr.coletapb.data.model.GpsRecord
 import br.edu.utfpr.coletapb.data.model.GpsRecordRequest
 import br.edu.utfpr.coletapb.data.remote.RetrofitClient
+import br.edu.utfpr.coletapb.utils.DateUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -12,6 +13,7 @@ import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
+import java.util.Date
 
 class GpsRepository(private val prefsHelper: SharedPreferencesHelper) {
     
@@ -54,6 +56,10 @@ class GpsRepository(private val prefsHelper: SharedPreferencesHelper) {
             val weightBody = collectedWeightKg?.toString()?.toRequestBody("text/plain".toMediaType())
             val conditionBody = pointCondition?.toRequestBody("text/plain".toMediaType())
             
+            // Converte timestamp atual para UTC antes de enviar
+            val gpsTimestampUtc = DateUtils.formatLocalToUtc(Date()) ?: ""
+            val gpsTimestampBody = gpsTimestampUtc.toRequestBody("text/plain".toMediaType())
+            
             var photoPart: MultipartBody.Part? = null
             if (photoFile != null && photoFile.exists()) {
                 val requestFile = photoFile.asRequestBody("image/jpeg".toMediaType())
@@ -72,6 +78,7 @@ class GpsRepository(private val prefsHelper: SharedPreferencesHelper) {
                 eventType = eventTypeBody,
                 isAutomatic = isAutomaticBody,
                 isOffline = isOfflineBody,
+                gpsTimestamp = gpsTimestampBody,
                 description = descriptionBody,
                 pointId = pointIdBody,
                 collectedWeightKg = weightBody,
@@ -141,12 +148,14 @@ class GpsRepository(private val prefsHelper: SharedPreferencesHelper) {
         records: List<GpsRecordRequest>
     ): Result<Int> = withContext(Dispatchers.IO) {
         try {
-            val recordsMap = records.map { record ->
-                mutableMapOf<String, Any>(
-                    "latitude" to record.latitude,
-                    "longitude" to record.longitude,
-                    "event_type" to record.event_type
-                ).apply {
+            // Converte para List<Map<String, Any>> sem wildcards para evitar erro do Retrofit
+            // Usa HashMap para garantir tipo exato Map<String, Any>
+            val recordsMap: List<Map<String, Any>> = records.map { record ->
+                val map = HashMap<String, Any>().apply {
+                    put("latitude", record.latitude)
+                    put("longitude", record.longitude)
+                    put("event_type", record.event_type)
+                    
                     record.speed_kmh?.let { put("speed_kmh", it) }
                     record.heading_degrees?.let { put("heading_degrees", it) }
                     record.accuracy_meters?.let { put("accuracy_meters", it) }
@@ -158,6 +167,7 @@ class GpsRepository(private val prefsHelper: SharedPreferencesHelper) {
                     record.collected_weight_kg?.let { put("collected_weight_kg", it) }
                     record.point_condition?.let { put("point_condition", it) }
                 }
+                map as Map<String, Any>
             }
             
             val response = RetrofitClient.apiService.registerGpsBatch(executionId, recordsMap)

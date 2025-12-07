@@ -1,73 +1,69 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:padding="24dp">
 
+    <!-- Título -->
     <TextView
+        android:id="@+id/txtDialogTitle"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Confirmar coleta"
+        android:text="Registrar parada"
         android:textSize="20sp"
         android:textStyle="bold"
-        android:textColor="@color/text_primary" />
+        android:textColor="@android:color/black" />
 
+    <!-- Tipo de parada (RadioGroup) -->
     <TextView
-        android:id="@+id/tvCollectionPointAddress"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
-        android:text="Você coletou no ponto 3 – Rua das Flores, 120?"
-        android:textSize="16sp"
-        android:textColor="@color/text_secondary" />
+        android:text="Tipo de parada *"
+        android:textSize="14sp"
+        android:textColor="@android:color/darker_gray" />
 
+    <RadioGroup
+        android:id="@+id/radioGroupStopType"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="vertical">
+
+        <RadioButton
+            android:id="@+id/radioStop"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Parada rápida"
+            android:checked="true" />
+
+        <RadioButton
+            android:id="@+id/radioBreak"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Intervalo / descanso" />
+    </RadioGroup>
+
+    <!-- Observações (opcional) -->
     <com.google.android.material.textfield.TextInputLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
-        android:hint="Peso coletado (kg)"
+        android:hint="Observações (opcional)"
         style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
 
         <com.google.android.material.textfield.TextInputEditText
-            android:id="@+id/etWeight"
+            android:id="@+id/edtObservations"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:inputType="numberDecimal"
-            android:hint="Ex: 45.5" />
+            android:inputType="text"
+            android:hint="Digite observações sobre a parada..." />
     </com.google.android.material.textfield.TextInputLayout>
 
-    <com.google.android.material.textfield.TextInputLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:hint="Condição do ponto"
-        style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
-
-        <AutoCompleteTextView
-            android:id="@+id/etPointCondition"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:inputType="none"
-            android:focusable="false"
-            android:hint="Selecione a condição" />
-    </com.google.android.material.textfield.TextInputLayout>
-
-    <com.google.android.material.textfield.TextInputLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:hint="Observação (opcional)"
-        style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
-
-        <com.google.android.material.textfield.TextInputEditText
-            android:id="@+id/etObservation"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:inputType="textMultiLine"
-            android:maxLines="3" />
-    </com.google.android.material.textfield.TextInputLayout>
-
+    <!-- Botões -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -76,22 +72,21 @@
         android:gravity="end">
 
         <Button
-            android:id="@+id/btCancel"
+            android:id="@+id/btnCancel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Cancelar"
+            android:text="CANCELAR"
             android:textAllCaps="false"
             style="@style/Widget.Material3.Button.OutlinedButton" />
 
         <Button
-            android:id="@+id/btConfirm"
+            android:id="@+id/btnSaveStop"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
-            android:text="Confirmar coleta"
+            android:text="REGISTRAR PARADA"
             android:textAllCaps="false"
-            android:backgroundTint="@color/primary_blue"
-            android:textColor="@color/white" />
+            style="@style/Widget.Material3.Button" />
     </LinearLayout>
 </LinearLayout>
 

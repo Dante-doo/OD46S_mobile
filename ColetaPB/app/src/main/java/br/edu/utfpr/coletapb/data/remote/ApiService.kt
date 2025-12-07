@@ -85,6 +85,12 @@ interface ApiService {
     suspend fun getMyCurrentExecution(): Response<Map<String, Any>>
 
     /**
+     * Obtém detalhes de uma execução específica
+     */
+    @GET("executions/{id}")
+    suspend fun getExecutionById(@Path("id") executionId: Long): Response<Map<String, Any>>
+
+    /**
      * Lista execuções
      */
     @GET("executions")
@@ -126,7 +132,7 @@ interface ApiService {
     @POST("executions/{executionId}/gps/batch")
     suspend fun registerGpsBatch(
         @Path("executionId") executionId: Long,
-        @Body records: List<Map<String, Any>>
+        @Body records: @JvmSuppressWildcards List<Map<String, @JvmSuppressWildcards Any>>
     ): Response<Map<String, Any>>
 
     /**

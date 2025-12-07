@@ -7,6 +7,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/background_light"
+    android:fitsSystemWindows="true"
     tools:context=".StartRoute">
 
     <!-- App Bar no topo -->
@@ -17,11 +18,12 @@
         android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar"
         app:elevation="4dp">
 
-        <androidx.appcompat.widget.Toolbar
-            android:id="@+id/toolbar"
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/topAppBar"
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
-            android:background="@color/primary_blue"
+            android:background="#1E4CC7"
+            app:navigationIcon="@drawable/ic_arrow_back"
             app:titleTextColor="@color/white"
             app:popupTheme="@style/ThemeOverlay.AppCompat.Light" />
 
@@ -244,7 +246,7 @@
                         style="@style/Widget.Material3.Button"
                         app:backgroundTint="@color/primary_blue" />
 
-                    <!-- Linha 2: Registrar problema | Cancelar rota -->
+                    <!-- Linha 2: Registrar problema | Registrar parada -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -270,25 +272,43 @@
                             app:iconGravity="textStart"
                             style="@style/Widget.Material3.Button" />
 
-                        <!-- Cancelar rota: outlined vermelho -->
+                        <!-- Registrar parada: outlined laranja -->
                         <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btCancelRoute"
+                            android:id="@+id/btRegisterStop"
                             android:layout_width="0dp"
                             android:layout_height="56dp"
                             android:layout_weight="1"
                             android:layout_marginStart="8dp"
-                            android:text="Cancelar rota"
+                            android:text="Registrar parada"
                             android:textAllCaps="false"
                             android:textSize="16sp"
-                            android:textColor="@color/error"
+                            android:textColor="@color/orange_500"
                             android:background="@drawable/button_outlined_red"
                             app:backgroundTint="@android:color/transparent"
-                            app:icon="@android:drawable/ic_menu_delete"
-                            app:iconTint="@color/error"
+                            app:icon="@android:drawable/ic_menu_recent_history"
+                            app:iconTint="@color/orange_500"
                             app:iconPadding="8dp"
                             app:iconGravity="textStart"
                             style="@style/Widget.Material3.Button" />
                     </LinearLayout>
+
+                    <!-- Linha 3: Cancelar rota -->
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btCancelRoute"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:layout_marginTop="12dp"
+                        android:text="Cancelar rota"
+                        android:textAllCaps="false"
+                        android:textSize="16sp"
+                        android:textColor="@color/error"
+                        android:background="@drawable/button_outlined_red"
+                        app:backgroundTint="@android:color/transparent"
+                        app:icon="@android:drawable/ic_menu_delete"
+                        app:iconTint="@color/error"
+                        app:iconPadding="8dp"
+                        app:iconGravity="textStart"
+                        style="@style/Widget.Material3.Button" />
 
                     <!-- Encerrar rota: outlined neutro, largura total -->
                     <com.google.android.material.button.MaterialButton

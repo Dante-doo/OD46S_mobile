@@ -22,6 +22,7 @@ import br.edu.utfpr.coletapb.data.AppDatabase
 import br.edu.utfpr.coletapb.data.dao.ExecutionDao
 import br.edu.utfpr.coletapb.data.dao.GpsDao
 import br.edu.utfpr.coletapb.data.local.SharedPreferencesHelper
+import br.edu.utfpr.coletapb.data.model.GpsEventType
 import br.edu.utfpr.coletapb.data.model.GpsRecordLocal
 import br.edu.utfpr.coletapb.data.repository.GpsRepository
 import br.edu.utfpr.coletapb.data.repository.SyncRepository
@@ -370,6 +371,94 @@ class GpsTrackingService : LifecycleService() {
             )
         } catch (e: Exception) {
             Log.e(TAG, "Exceção ao enviar GPS ao backend: ${e.message}", e)
+        }
+    }
+    
+    /**
+     * Envia um evento GPS único ao backend
+     * Usado para enviar eventos específicos como START, STOP, BREAK, etc.
+     * 
+     * @param type Tipo do evento GPS
+     * @param isAutomatic Se o evento foi gerado automaticamente ou manualmente
+     * @param description Descrição opcional do evento
+     */
+    private fun sendSingleEvent(
+        type: GpsEventType,
+        isAutomatic: Boolean,
+        description: String? = null
+    ) {
+        val execId = backendExecutionId ?: run {
+            Log.w(TAG, "backendExecutionId é null, não é possível enviar evento")
+            return
+        }
+        
+        // Verifica permissões
+        if (!checkLocationPermissions()) {
+            Log.w(TAG, "Permissões de localização não concedidas")
+            return
+        }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // Obtém a última localização conhecida
+                val location = try {
+                    com.google.android.gms.tasks.Tasks.await(fusedLocationClient.lastLocation)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Erro ao obter localização: ${e.message}", e)
+                    null
+                }
+                
+                if (location == null) {
+                    Log.w(TAG, "Não foi possível obter localização para evento ${type.apiValue}")
+                    return@launch
+                }
+
+                // Calcula velocidade, heading e accuracy se disponíveis
+                val speedKmh = if (location.hasSpeed()) {
+                    location.speed * 3.6 // m/s para km/h
+                } else {
+                    null
+                }
+                
+                val headingDegrees = if (location.hasBearing()) {
+                    location.bearing.toDouble()
+                } else {
+                    null
+                }
+                
+                val accuracyMeters = if (location.hasAccuracy()) {
+                    location.accuracy.toDouble()
+                } else {
+                    null
+                }
+
+                Log.d(TAG, "Enviando evento ${type.apiValue}: lat=${location.latitude}, lng=${location.longitude}")
+
+                // Envia via GpsRepository (que já faz a conversão para UTC)
+                val result = gpsRepository.registerGpsPosition(
+                    executionId = execId,
+                    latitude = location.latitude,
+                    longitude = location.longitude,
+                    speedKmh = speedKmh,
+                    headingDegrees = headingDegrees,
+                    accuracyMeters = accuracyMeters,
+                    eventType = type.apiValue,
+                    isAutomatic = isAutomatic,
+                    isOffline = false,
+                    description = description
+                )
+
+                result.fold(
+                    onSuccess = { record ->
+                        Log.d(TAG, "Evento ${type.apiValue} enviado com sucesso: id=${record.id}")
+                    },
+                    onFailure = { error ->
+                        Log.e(TAG, "Erro ao enviar evento ${type.apiValue}: ${error.message}", error)
+                    }
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Exceção ao enviar evento ${type.apiValue}: ${e.message}", e)
+            }
         }
     }
     

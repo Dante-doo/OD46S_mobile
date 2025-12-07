@@ -232,11 +232,15 @@ class TruckList : AppCompatActivity() {
                         
                         if (state.assignments.isEmpty()) {
                             // Não há escalas - o emptyView será mostrado automaticamente
-                            adapter = AssignmentAdapter(this@TruckList, emptyList())
+                            adapter = AssignmentAdapter(this@TruckList, mutableListOf()) { assignment ->
+                                navigateToAssignmentDetails(assignment)
+                            }
                             listView.adapter = adapter
                             titleTextView.text = "Nenhuma Escala Ativa"
                         } else {
-                            adapter = AssignmentAdapter(this@TruckList, state.assignments)
+                            adapter = AssignmentAdapter(this@TruckList, state.assignments.toMutableList()) { assignment ->
+                                navigateToAssignmentDetails(assignment)
+                            }
                             listView.adapter = adapter
                             titleTextView.text = "Minhas Escalas (${state.assignments.size})"
                         }
@@ -315,6 +319,19 @@ class TruckList : AppCompatActivity() {
         }
         startActivity(intent)
         finish()
+    }
+    
+    private fun navigateToAssignmentDetails(assignment: br.edu.utfpr.coletapb.data.model.Assignment) {
+        val intent = Intent(this, AssignmentDetailsActivity::class.java).apply {
+            putExtra("assignment_id", assignment.id)
+            putExtra("route_id", assignment.routeId)
+            putExtra("route_name", assignment.routeName ?: "Rota")
+            putExtra("driver_id", assignment.driverId)
+            putExtra("driver_name", assignment.driverName)
+            putExtra("vehicle_id", assignment.vehicleId)
+            putExtra("vehicle_plate", assignment.vehiclePlate)
+        }
+        startActivity(intent)
     }
     
 }

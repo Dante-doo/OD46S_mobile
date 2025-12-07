@@ -44,7 +44,8 @@ class AssignmentRepository(private val prefsHelper: SharedPreferencesHelper) {
                             driverId = ((map["driver"] as? Map<*, *>)?.get("id") as? Number)?.toLong() ?: 0L,
                             driverName = (map["driver"] as? Map<*, *>)?.get("name") as? String,
                             vehicleId = ((map["vehicle"] as? Map<*, *>)?.get("id") as? Number)?.toLong() ?: 0L,
-                            vehiclePlate = (map["vehicle"] as? Map<*, *>)?.get("plate") as? String,
+                            vehiclePlate = (map["vehicle"] as? Map<*, *>)?.get("licensePlate") as? String
+                                ?: (map["vehicle"] as? Map<*, *>)?.get("plate") as? String, // Fallback para "plate"
                             status = map["status"] as? String ?: "UNKNOWN",
                             startDate = map["startDate"] as? String,
                             endDate = map["endDate"] as? String,
@@ -62,28 +63,34 @@ class AssignmentRepository(private val prefsHelper: SharedPreferencesHelper) {
                 // Combina a rota atual (se existir) com as escalas ativas disponíveis
                 val allAssignments = mutableListOf<Assignment>()
                 
-                // Adiciona a rota atual primeiro (se existir e não estiver duplicada)
+                // Cria um conjunto de IDs já adicionados para evitar duplicatas
+                val addedIds = mutableSetOf<Long>()
+                
+                // Se há rota atual, verifica se ela já está na lista de escalas ativas
                 if (currentAssignment != null) {
-                    val isDuplicate = assignments.any { it.id == currentAssignment.id }
-                    if (!isDuplicate) {
+                    val existingAssignment = assignments.find { it.id == currentAssignment.id }
+                    if (existingAssignment != null) {
+                        // Se já existe na lista, marca como atual e adiciona
+                        allAssignments.add(existingAssignment.copy(isCurrent = true))
+                        addedIds.add(existingAssignment.id)
+                        Log.d("AssignmentRepository", "Rota atual encontrada na lista e marcada como atual")
+                    } else {
+                        // Se não existe, adiciona como atual
                         allAssignments.add(currentAssignment)
-                        Log.d("AssignmentRepository", "Adicionada rota atual (em execução)")
-                    } else {
-                        Log.d("AssignmentRepository", "Rota atual já está na lista de escalas ativas")
+                        addedIds.add(currentAssignment.id)
+                        Log.d("AssignmentRepository", "Adicionada rota atual (não estava na lista de escalas ativas)")
                     }
                 }
                 
-                // Adiciona todas as escalas ativas disponíveis, marcando a atual se necessário
+                // Adiciona todas as escalas ativas que ainda não foram adicionadas
                 assignments.forEach { assignment ->
-                    if (currentAssignment != null && assignment.id == currentAssignment.id) {
-                        // Marca como atual se for a rota atual
-                        allAssignments.add(assignment.copy(isCurrent = true))
-                    } else {
+                    if (!addedIds.contains(assignment.id)) {
                         allAssignments.add(assignment)
+                        addedIds.add(assignment.id)
                     }
                 }
                 
-                Log.d("AssignmentRepository", "Total de ${allAssignments.size} escalas (atual + disponíveis)")
+                Log.d("AssignmentRepository", "Total de ${allAssignments.size} escalas (sem duplicatas)")
                 
                 Result.success(allAssignments)
             } else {
@@ -123,7 +130,8 @@ class AssignmentRepository(private val prefsHelper: SharedPreferencesHelper) {
                             driverId = ((assignmentData["driver"] as? Map<*, *>)?.get("id") as? Number)?.toLong() ?: 0L,
                             driverName = (assignmentData["driver"] as? Map<*, *>)?.get("name") as? String,
                             vehicleId = ((assignmentData["vehicle"] as? Map<*, *>)?.get("id") as? Number)?.toLong() ?: 0L,
-                            vehiclePlate = (assignmentData["vehicle"] as? Map<*, *>)?.get("plate") as? String,
+                            vehiclePlate = (assignmentData["vehicle"] as? Map<*, *>)?.get("licensePlate") as? String
+                                ?: (assignmentData["vehicle"] as? Map<*, *>)?.get("plate") as? String, // Fallback para "plate"
                             status = assignmentData["status"] as? String ?: "UNKNOWN",
                             startDate = assignmentData["startDate"] as? String,
                             endDate = assignmentData["endDate"] as? String,
@@ -151,6 +159,57 @@ class AssignmentRepository(private val prefsHelper: SharedPreferencesHelper) {
             }
         } catch (e: Exception) {
             Log.e("AssignmentRepository", "Exceção ao buscar assignment atual: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Busca todas as assignments (para ADMIN)
+     */
+    suspend fun getAllAssignments(status: String? = null): Result<List<Assignment>> = withContext(Dispatchers.IO) {
+        try {
+            val response = RetrofitClient.apiService.getAssignments(
+                driverId = null, // ADMIN não filtra por driver
+                status = status
+            )
+            
+            if (response.isSuccessful && response.body() != null) {
+                val body = response.body()!!
+                val data = body["data"] as? Map<String, Any>
+                val assignmentsList = (data?.get("assignments") as? List<Map<String, Any>>) 
+                    ?: emptyList()
+                
+                val assignments = assignmentsList.mapNotNull { map ->
+                    try {
+                        Assignment(
+                            id = (map["id"] as? Number)?.toLong() ?: 0L,
+                            routeId = ((map["route"] as? Map<*, *>)?.get("id") as? Number)?.toLong() ?: 0L,
+                            routeName = (map["route"] as? Map<*, *>)?.get("name") as? String,
+                            driverId = ((map["driver"] as? Map<*, *>)?.get("id") as? Number)?.toLong() ?: 0L,
+                            driverName = (map["driver"] as? Map<*, *>)?.get("name") as? String,
+                            vehicleId = ((map["vehicle"] as? Map<*, *>)?.get("id") as? Number)?.toLong() ?: 0L,
+                            vehiclePlate = (map["vehicle"] as? Map<*, *>)?.get("licensePlate") as? String
+                                ?: (map["vehicle"] as? Map<*, *>)?.get("plate") as? String, // Fallback para "plate"
+                            status = map["status"] as? String ?: "UNKNOWN",
+                            startDate = map["startDate"] as? String,
+                            endDate = map["endDate"] as? String,
+                            frequency = map["frequency"] as? String,
+                            isCurrent = false
+                        )
+                    } catch (e: Exception) {
+                        Log.e("AssignmentRepository", "Erro ao mapear assignment: ${e.message}", e)
+                        null
+                    }
+                }
+                
+                Result.success(assignments)
+            } else {
+                val errorMsg = response.errorBody()?.string() ?: "Erro desconhecido"
+                Log.e("AssignmentRepository", "Erro ao buscar assignments: ${response.code()} - $errorMsg")
+                Result.failure(Exception("Erro ao buscar escalas: ${response.code()}"))
+            }
+        } catch (e: Exception) {
+            Log.e("AssignmentRepository", "Exceção ao buscar assignments: ${e.message}", e)
             Result.failure(e)
         }
     }

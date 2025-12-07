@@ -11,11 +11,10 @@ import br.edu.utfpr.coletapb.data.local.SharedPreferencesHelper
 import br.edu.utfpr.coletapb.data.model.ExecutionLocal
 import br.edu.utfpr.coletapb.data.model.GpsRecordLocal
 import br.edu.utfpr.coletapb.data.model.GpsRecordRequest
+import br.edu.utfpr.coletapb.utils.DateUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
 
 class SyncRepository(private val context: Context, private val prefsHelper: SharedPreferencesHelper) {
     
@@ -24,8 +23,6 @@ class SyncRepository(private val context: Context, private val prefsHelper: Shar
     private val gpsDao = db.gpsDao()
     private val gpsRepository = GpsRepository(prefsHelper)
     private val executionRepository = ExecutionRepository(prefsHelper)
-    
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
     
     fun isOnline(): Boolean {
         val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -109,13 +106,15 @@ class SyncRepository(private val context: Context, private val prefsHelper: Shar
                     }
                     
                     // Converter para GpsRecordRequest
+                    // IMPORTANTE: Converte timestamp local para UTC antes de enviar
                     val gpsRequests = records.map { record ->
+                        val timestampUtc = DateUtils.formatLocalToUtc(Date(record.timestamp))
                         GpsRecordRequest(
                             latitude = record.lat.toString(),
                             longitude = record.lng.toString(),
                             event_type = record.eventType,
                             is_offline = true,
-                            gps_timestamp = dateFormat.format(Date(record.timestamp))
+                            gps_timestamp = timestampUtc ?: ""
                         )
                     }
                     

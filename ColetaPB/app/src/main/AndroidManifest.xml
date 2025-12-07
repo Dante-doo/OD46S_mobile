@@ -59,6 +59,36 @@
             android:exported="false"
             android:parentActivityName=".StartRoute" />
 
+        <!-- Lista de assignments (rotas disponíveis) -->
+        <activity
+            android:name=".AssignmentListActivity"
+            android:exported="false"
+            android:parentActivityName=".LoginPage" />
+
+        <!-- Detalhes do assignment -->
+        <activity
+            android:name=".AssignmentDetailsActivity"
+            android:exported="false"
+            android:parentActivityName=".AssignmentListActivity" />
+
+        <!-- Resumo da execução -->
+        <activity
+            android:name=".ExecutionSummaryActivity"
+            android:exported="false"
+            android:parentActivityName=".StartRoute" />
+
+        <!-- Mapa do trajeto da execução -->
+        <activity
+            android:name=".ExecutionMapActivity"
+            android:exported="false"
+            android:parentActivityName=".ExecutionSummaryActivity" />
+
+        <!-- Histórico de execuções -->
+        <activity
+            android:name=".ExecutionHistoryActivity"
+            android:exported="false"
+            android:parentActivityName=".AssignmentListActivity" />
+
         <!-- Serviço de rastreamento GPS -->
         <service
             android:name=".service.GpsTrackingService"

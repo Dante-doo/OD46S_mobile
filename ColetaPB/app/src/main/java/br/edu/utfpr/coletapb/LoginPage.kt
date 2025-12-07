@@ -9,12 +9,16 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import br.edu.utfpr.coletapb.config.ApiConfig
+import br.edu.utfpr.coletapb.data.AppDatabase
 import br.edu.utfpr.coletapb.data.local.SharedPreferencesHelper
 import br.edu.utfpr.coletapb.data.model.LoginRequest
 import br.edu.utfpr.coletapb.data.remote.RetrofitClient
+import br.edu.utfpr.coletapb.data.repository.ExecutionRepository
 import br.edu.utfpr.coletapb.utils.GpsMonitor
 import com.google.android.material.textfield.TextInputEditText
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import retrofit2.HttpException
 
 class LoginPage : AppCompatActivity() {
@@ -98,12 +102,12 @@ class LoginPage : AppCompatActivity() {
                         // Verifica GPS antes de navegar
                         if (gpsMonitor.isGpsEnabled()) {
                             Toast.makeText(this@LoginPage, "Bem-vindo, ${loginResponse.name}!", Toast.LENGTH_SHORT).show()
-                            navigateToTruckList()
+                            checkCurrentExecutionAndNavigate()
                         } else {
                             gpsMonitor.checkAndRequestGps(
                                 onGpsEnabled = {
                                     Toast.makeText(this@LoginPage, "Bem-vindo, ${loginResponse.name}!", Toast.LENGTH_SHORT).show()
-                                    navigateToTruckList()
+                                    checkCurrentExecutionAndNavigate()
                                 },
                                 onGpsDisabled = {
                                     // GPS não ativado, não navega
@@ -130,8 +134,81 @@ class LoginPage : AppCompatActivity() {
         }
     }
     
-    private fun navigateToTruckList() {
-        val intent = Intent(this, TruckList::class.java)
+    /**
+     * Verifica se há uma execução em andamento e navega para a tela apropriada
+     * Verifica primeiro no banco local, depois no backend
+     */
+    private fun checkCurrentExecutionAndNavigate() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // Primeiro verifica no banco local se há execução em andamento
+                val db = AppDatabase.getDatabase(this@LoginPage)
+                val executionDao = db.executionDao()
+                val localExecution = executionDao.getCurrentExecution()
+                
+                if (localExecution != null && localExecution.status == "IN_PROGRESS") {
+                    // Há execução local em andamento - navega para StartRoute
+                    Log.d("LoginPage", "Execução local em andamento encontrada: routeId=${localExecution.routeId}, execLocalId=${localExecution.localId}")
+                    withContext(Dispatchers.Main) {
+                        val intent = Intent(this@LoginPage, StartRoute::class.java).apply {
+                            putExtra("route_id", localExecution.routeId)
+                            putExtra("route_name", "Rota em andamento")
+                            // assignmentId pode ser 0L, mas StartRoute vai restaurar a execução local
+                            putExtra("assignment_id", 0L)
+                        }
+                        startActivity(intent)
+                        finish()
+                    }
+                    return@launch
+                }
+                
+                // Se não encontrou no local, verifica no backend
+                val executionRepo = ExecutionRepository(prefsHelper)
+                val result = executionRepo.getMyCurrentExecution()
+                
+                result.fold(
+                    onSuccess = { execution ->
+                        if (execution != null && execution.status == "IN_PROGRESS") {
+                            // Há uma execução em andamento no backend - vai direto para a tela de execução
+                            Log.d("LoginPage", "Execução em andamento encontrada no backend: ${execution.id}")
+                            withContext(Dispatchers.Main) {
+                                val intent = Intent(this@LoginPage, StartRoute::class.java).apply {
+                                    putExtra("execution_id", execution.id)
+                                    putExtra("route_id", execution.routeId)
+                                    putExtra("route_name", execution.routeName ?: "Rota")
+                                }
+                                startActivity(intent)
+                                finish()
+                            }
+                        } else {
+                            // Não há execução em andamento - vai para lista de assignments
+                            withContext(Dispatchers.Main) {
+                                navigateToAssignmentList()
+                            }
+                        }
+                    },
+                    onFailure = { error ->
+                        Log.e("LoginPage", "Erro ao verificar execução atual no backend: ${error.message}")
+                        // Em caso de erro, vai para lista de assignments
+                        withContext(Dispatchers.Main) {
+                            navigateToAssignmentList()
+                        }
+                    }
+                )
+            } catch (e: Exception) {
+                Log.e("LoginPage", "Exceção ao verificar execução: ${e.message}", e)
+                withContext(Dispatchers.Main) {
+                    navigateToAssignmentList()
+                }
+            }
+        }
+    }
+    
+    /**
+     * Navega para a lista de assignments (rotas disponíveis)
+     */
+    private fun navigateToAssignmentList() {
+        val intent = Intent(this, AssignmentListActivity::class.java)
         startActivity(intent)
         finish()
     }
