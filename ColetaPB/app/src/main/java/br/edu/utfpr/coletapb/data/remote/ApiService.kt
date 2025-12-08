@@ -14,7 +14,6 @@ interface ApiService {
     @GET("vehicles")
     suspend fun getVehicles(): Response<List<VehicleDto>>
 
-    // MÉTODO CORRIGIDO: Retorna RouteListResponse e usa vehicle_id
     @GET("routes")
     suspend fun getRoutes(
         @Query("driver_id") driverId: Long? = null,
@@ -36,17 +35,22 @@ interface ApiService {
     @PATCH("executions/{id}/complete")
     suspend fun completeExecution(@Path("id") id: Long, @Body request: CompleteExecutionRequest): Response<Void>
 
+    // CORREÇÃO CRÍTICA: Os nomes aqui DEVEM ser snake_case para o servidor aceitar
     @Multipart
     @POST("executions/{id}/gps")
     suspend fun sendGpsWithPhoto(
         @Path("id") executionId: Long,
+
         @Part("latitude") latitude: RequestBody,
         @Part("longitude") longitude: RequestBody,
-        @Part("gpsTimestamp") timestamp: RequestBody,
-        @Part("eventType") eventType: RequestBody,
-        @Part("isAutomatic") isAutomatic: RequestBody,
-        @Part("isOffline") isOffline: RequestBody,
+
+        @Part("gps_timestamp") timestamp: RequestBody, // snake_case
+        @Part("event_type") eventType: RequestBody,    // snake_case
+        @Part("is_automatic") isAutomatic: RequestBody,// snake_case
+        @Part("is_offline") isOffline: RequestBody,    // snake_case
+
         @Part photo: MultipartBody.Part,
+
         @Part("description") description: RequestBody? = null,
         @Part("point_id") pointId: RequestBody? = null,
         @Part("collected_weight_kg") weight: RequestBody? = null,

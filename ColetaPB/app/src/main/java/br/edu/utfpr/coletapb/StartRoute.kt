@@ -3,9 +3,7 @@ package br.edu.utfpr.coletapb
 import android.Manifest
 import android.content.pm.PackageManager
 import android.location.Location
-import android.net.Uri
 import android.os.Bundle
-import android.os.Looper
 import android.text.InputType
 import android.util.Log
 import android.view.LayoutInflater
@@ -68,7 +66,6 @@ class StartRoute : AppCompatActivity() {
 
     private var currentPhotoPath: String? = null
     private var pendingRecord: GpsRecordLocal? = null
-
     private var pendingEventType: String? = null
     private var pendingDesc: String? = null
     private var pendingPointId: Long? = null
@@ -132,26 +129,9 @@ class StartRoute : AppCompatActivity() {
         setupLocationCallback()
 
         if (savedInstanceState != null) {
-            routeStarted = savedInstanceState.getBoolean("route_started")
-            execLocalId = savedInstanceState.getLong("exec_local_id")
-
-            if (currentAssignmentId == null) {
-                currentAssignmentId = savedInstanceState.getLong("assignment_id").takeIf { it != 0L }
-            }
-
-            currentPhotoPath = savedInstanceState.getString("photo_path")
-            pendingEventType = savedInstanceState.getString("pending_type")
-            pendingDesc = savedInstanceState.getString("pending_desc")
-
-            if (savedInstanceState.containsKey("pending_point_id"))
-                pendingPointId = savedInstanceState.getLong("pending_point_id")
-
-            if (savedInstanceState.containsKey("pending_weight"))
-                pendingWeight = savedInstanceState.getDouble("pending_weight")
-
-            pendingCondition = savedInstanceState.getString("pending_cond")
-
-            if (routeStarted) startLocationUpdates()
+            restoreInstanceState(savedInstanceState)
+        } else {
+            checkForActiveExecution()
         }
 
         applyUiState()
@@ -166,13 +146,88 @@ class StartRoute : AppCompatActivity() {
             }
         }
 
-        btFinish.setOnClickListener {
-            showKmDialog(isStart = false)
-        }
+        btFinish.setOnClickListener { showKmDialog(isStart = false) }
+        btActions.setOnClickListener { showActionMenu() }
+    }
 
-        btActions.setOnClickListener {
-            showActionMenu()
+    private fun checkForActiveExecution() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val response = RetrofitClient.getApiService(applicationContext).getMyCurrentExecution()
+
+                if (response.isSuccessful) {
+                    val execDto = response.body()?.data?.execution
+                    if (execDto != null && execDto.status == "IN_PROGRESS") {
+                        Log.d("StartRoute", "Recuperado do servidor: ID ${execDto.id}")
+
+                        val existingLocal = executionDao.getByServerId(execDto.id)
+                        if (existingLocal != null) {
+                            execLocalId = existingLocal.localId
+                        } else {
+                            val newLocal = ExecutionLocal(
+                                routeId = routeId,
+                                serverExecutionId = execDto.id,
+                                assignmentId = execDto.assignment_id ?: 0L,
+                                initialKm = execDto.initial_km ?: 0,
+                                status = "IN_PROGRESS",
+                                startLat = 0.0,
+                                startLng = 0.0,
+                                startTimestamp = System.currentTimeMillis()
+                            )
+                            execLocalId = executionDao.insert(newLocal)
+                        }
+                        currentAssignmentId = execDto.assignment_id
+                        routeStarted = true
+
+                        withContext(Dispatchers.Main) {
+                            applyUiState()
+                            startLocationUpdates()
+                            Toast.makeText(this@StartRoute, "Sincronizado com execução ativa!", Toast.LENGTH_SHORT).show()
+                        }
+                        return@launch
+                    }
+                } else {
+                    val errorBody = response.errorBody()?.string()
+                    if (errorBody != null && errorBody.contains("NO_ACTIVE_EXECUTION")) {
+                        Log.d("StartRoute", "API confirmou: Nenhuma execução ativa.")
+                        return@launch
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("StartRoute", "Erro de conexão (Offline?): ${e.message}")
+            }
+
+            val localActive = executionDao.getActiveExecution()
+            if (localActive != null) {
+                Log.d("StartRoute", "Recuperado localmente (Offline): ID ${localActive.localId}")
+                execLocalId = localActive.localId
+                currentAssignmentId = localActive.assignmentId
+                routeStarted = true
+                withContext(Dispatchers.Main) {
+                    applyUiState()
+                    startLocationUpdates()
+                    Toast.makeText(this@StartRoute, "Modo Offline: Rota recuperada!", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
+    }
+
+    private fun restoreInstanceState(savedInstanceState: Bundle) {
+        routeStarted = savedInstanceState.getBoolean("route_started")
+        execLocalId = savedInstanceState.getLong("exec_local_id")
+        if (currentAssignmentId == null) {
+            currentAssignmentId = savedInstanceState.getLong("assignment_id").takeIf { it != 0L }
+        }
+        currentPhotoPath = savedInstanceState.getString("photo_path")
+        pendingEventType = savedInstanceState.getString("pending_type")
+        pendingDesc = savedInstanceState.getString("pending_desc")
+        if (savedInstanceState.containsKey("pending_point_id"))
+            pendingPointId = savedInstanceState.getLong("pending_point_id")
+        if (savedInstanceState.containsKey("pending_weight"))
+            pendingWeight = savedInstanceState.getDouble("pending_weight")
+        pendingCondition = savedInstanceState.getString("pending_cond")
+
+        if (routeStarted) startLocationUpdates()
     }
 
     private fun clearPendingData() {
@@ -190,10 +245,8 @@ class StartRoute : AppCompatActivity() {
             Toast.makeText(this, "Sem permissão de GPS", Toast.LENGTH_SHORT).show()
             return
         }
-
         startLocationUpdates()
         Toast.makeText(this, "Iniciando...", Toast.LENGTH_SHORT).show()
-
         try {
             fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
                 val lat = loc?.latitude ?: 0.0
@@ -209,10 +262,8 @@ class StartRoute : AppCompatActivity() {
 
     private fun createExecution(lat: Double, lng: Double, initialKm: Int) {
         if (routeStarted) return
-
         lifecycleScope.launch(Dispatchers.IO) {
             var serverId: Long? = null
-
             try {
                 if (currentAssignmentId != null) {
                     val req = StartExecutionRequest(
@@ -223,7 +274,6 @@ class StartRoute : AppCompatActivity() {
                         initial_notes = "Iniciado pelo App"
                     )
                     val res = RetrofitClient.getApiService(applicationContext).startExecution(req)
-
                     if (res.isSuccessful && res.body() != null) {
                         serverId = res.body()?.data?.execution?.id
                     } else {
@@ -231,34 +281,29 @@ class StartRoute : AppCompatActivity() {
                         Log.e("StartRoute", "Erro API: " + res.code() + " - " + errorBody)
                     }
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+            } catch (e: Exception) { e.printStackTrace() }
 
             if (serverId != null) {
                 val now = System.currentTimeMillis()
-                execLocalId = executionDao.insert(
-                    ExecutionLocal(
-                        routeId = routeId,
-                        serverExecutionId = serverId,
-                        assignmentId = currentAssignmentId ?: 0L,
-                        initialKm = initialKm,
-                        status = "IN_PROGRESS",
-                        startLat = lat,
-                        startLng = lng,
-                        startTimestamp = now
-                    )
+                val newLocal = ExecutionLocal(
+                    routeId = routeId,
+                    serverExecutionId = serverId,
+                    assignmentId = currentAssignmentId ?: 0L,
+                    initialKm = initialKm,
+                    status = "IN_PROGRESS",
+                    startLat = lat,
+                    startLng = lng,
+                    startTimestamp = now
                 )
+                execLocalId = executionDao.insert(newLocal)
 
-                gpsDao.insert(
-                    GpsRecordLocal(
-                        executionLocalId = execLocalId,
-                        timestamp = now,
-                        lat = lat,
-                        lng = lng,
-                        eventType = "START"
-                    )
-                )
+                gpsDao.insert(GpsRecordLocal(
+                    executionLocalId = execLocalId,
+                    timestamp = now,
+                    lat = lat,
+                    lng = lng,
+                    eventType = "START"
+                ))
 
                 withContext(Dispatchers.Main) {
                     routeStarted = true
@@ -283,7 +328,6 @@ class StartRoute : AppCompatActivity() {
             "Abastecimento",
             "Parada Almoço"
         )
-
         AlertDialog.Builder(this)
             .setTitle("Registrar Ação")
             .setItems(options) { _, which ->
@@ -305,7 +349,6 @@ class StartRoute : AppCompatActivity() {
         val etWeight = view.findViewById<EditText>(R.id.etWeight)
         val spCondition = view.findViewById<Spinner>(R.id.spCondition)
         val etDesc = view.findViewById<EditText>(R.id.etDescription)
-
         val conditions = arrayOf("NORMAL", "SATURATED", "DAMAGED", "INACCESSIBLE")
         spCondition.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, conditions)
 
@@ -318,7 +361,6 @@ class StartRoute : AppCompatActivity() {
                     Toast.makeText(this, "ID do Ponto é obrigatório!", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
                 }
-
                 prepareRecord(
                     eventType = eventType,
                     description = etDesc.text.toString(),
@@ -334,7 +376,6 @@ class StartRoute : AppCompatActivity() {
     private fun showGenericDialog(eventType: String) {
         val input = EditText(this)
         input.hint = "Descrição (Opcional)"
-
         AlertDialog.Builder(this)
             .setTitle("Registro")
             .setView(input)
@@ -348,13 +389,11 @@ class StartRoute : AppCompatActivity() {
     private fun prepareRecord(eventType: String, description: String?, pointId: Long? = null, weight: Double? = null, condition: String? = null) {
         val lat = lastLocation?.latitude ?: 0.0
         val lng = lastLocation?.longitude ?: 0.0
-
         pendingEventType = eventType
         pendingDesc = description
         pendingPointId = pointId
         pendingWeight = weight
         pendingCondition = condition
-
         val record = GpsRecordLocal(
             executionLocalId = execLocalId,
             timestamp = System.currentTimeMillis(),
@@ -366,7 +405,6 @@ class StartRoute : AppCompatActivity() {
             collectedWeight = weight,
             pointCondition = condition
         )
-
         AlertDialog.Builder(this)
             .setTitle("Foto")
             .setMessage("Deseja tirar uma foto?")
@@ -385,16 +423,13 @@ class StartRoute : AppCompatActivity() {
         try {
             val photoFile = File.createTempFile("img_${System.currentTimeMillis()}", ".jpg", externalCacheDir)
             currentPhotoPath = photoFile.absolutePath
-
-            // CORREÇÃO: Usar BuildConfig.APPLICATION_ID para garantir o authorities correto
             val uri = FileProvider.getUriForFile(
                 this,
-                "${BuildConfig.APPLICATION_ID}.provider",
+                "${applicationContext.packageName}.provider",
                 photoFile
             )
             takePictureLauncher.launch(uri)
         } catch (e: Exception) {
-            // CORREÇÃO: Log para debug do erro real
             Log.e("CAMERA_ERROR", "Erro ao abrir câmera: ${e.message}", e)
             Toast.makeText(this, "Erro ao abrir câmera. Veja o Logcat.", Toast.LENGTH_SHORT).show()
         }
@@ -413,10 +448,8 @@ class StartRoute : AppCompatActivity() {
         stopLocationUpdates()
         val lat = lastLocation?.latitude ?: 0.0
         val lng = lastLocation?.longitude ?: 0.0
-
         lifecycleScope.launch(Dispatchers.IO) {
             val localExec = executionDao.getById(execLocalId)
-
             var serverId = localExec?.serverExecutionId
             if (serverId == null && localExec != null) {
                 serverId = recoverServerId(localExec)
@@ -426,7 +459,6 @@ class StartRoute : AppCompatActivity() {
                 try {
                     val allPoints = gpsDao.listByExecution(execLocalId)
                     val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
-
                     val (withPhoto, withoutPhoto) = allPoints.partition { !it.photoPath.isNullOrEmpty() }
 
                     if (withoutPhoto.isNotEmpty()) {
@@ -462,7 +494,6 @@ class StartRoute : AppCompatActivity() {
                             assignment_id = assignId
                         )
                     )
-
                     withContext(Dispatchers.Main) {
                         Toast.makeText(applicationContext, "Sincronizado com sucesso!", Toast.LENGTH_LONG).show()
                     }
@@ -470,7 +501,7 @@ class StartRoute : AppCompatActivity() {
                     e.printStackTrace()
                     withContext(Dispatchers.Main) {
                         Log.e("FinishRoute", "Erro: " + e.message)
-                        Toast.makeText(applicationContext, "Salvo offline. Erro no envio.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(applicationContext, "Erro no envio. Verifique Logcat.", Toast.LENGTH_LONG).show()
                     }
                 }
             } else {
@@ -478,13 +509,11 @@ class StartRoute : AppCompatActivity() {
                     Toast.makeText(applicationContext, "Erro: Sem ID do servidor. Dados salvos apenas localmente.", Toast.LENGTH_LONG).show()
                 }
             }
-
             if (localExec != null) {
                 executionDao.update(
                     localExec.copy(endTimestamp = System.currentTimeMillis(), status = "COMPLETED", endLat = lat, endLng = lng)
                 )
             }
-
             withContext(Dispatchers.Main) { finish() }
         }
     }
@@ -497,15 +526,6 @@ class StartRoute : AppCompatActivity() {
                 val id = current.body()?.data?.execution?.id
                 if (id != null) return id
             }
-            val req = StartExecutionRequest(
-                assignment_id = localExec.assignmentId,
-                initial_km = localExec.initialKm,
-                latitude = localExec.startLat,
-                longitude = localExec.startLng,
-                initial_notes = "Recuperação automática"
-            )
-            val res = api.startExecution(req)
-            if (res.isSuccessful) return res.body()?.data?.execution?.id
         } catch (e: Exception) { e.printStackTrace() }
         return null
     }
@@ -513,12 +533,18 @@ class StartRoute : AppCompatActivity() {
     private suspend fun uploadSingleRecordWithPhoto(executionId: Long, record: GpsRecordLocal, sdf: SimpleDateFormat) {
         try {
             val file = File(record.photoPath!!)
-            if (!file.exists()) return
+            if (!file.exists()) {
+                Log.e("UploadPhoto", "Arquivo não encontrado: ${record.photoPath}")
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(applicationContext, "Erro: Foto não encontrada no dispositivo", Toast.LENGTH_SHORT).show()
+                }
+                return
+            }
 
-            val mediaTypeImg = "image/*".toMediaTypeOrNull()
+            // CORREÇÃO: Usando image/jpeg especificamente
+            val mediaTypeImg = "image/jpeg".toMediaTypeOrNull()
             val reqFile = file.asRequestBody(mediaTypeImg)
             val photoPart = MultipartBody.Part.createFormData("photo", file.name, reqFile)
-
             val txt = "text/plain".toMediaTypeOrNull()
 
             val descPart = record.description?.toRequestBody(txt)
@@ -526,7 +552,7 @@ class StartRoute : AppCompatActivity() {
             val wPart = record.collectedWeight?.toString()?.toRequestBody(txt)
             val condPart = record.pointCondition?.toRequestBody(txt)
 
-            RetrofitClient.getApiService(applicationContext).sendGpsWithPhoto(
+            val res = RetrofitClient.getApiService(applicationContext).sendGpsWithPhoto(
                 executionId = executionId,
                 latitude = record.lat.toString().toRequestBody(txt),
                 longitude = record.lng.toString().toRequestBody(txt),
@@ -540,7 +566,24 @@ class StartRoute : AppCompatActivity() {
                 weight = wPart,
                 condition = condPart
             )
-        } catch (e: Exception) { e.printStackTrace() }
+
+            if (!res.isSuccessful) {
+                val errorMsg = res.errorBody()?.string()
+                Log.e("UploadPhoto", "Erro no upload da foto: Code ${res.code()} - $errorMsg")
+                // Feedback visual para o usuário
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(applicationContext, "Falha ao enviar foto: Erro ${res.code()}", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                Log.d("UploadPhoto", "Foto enviada com sucesso!")
+            }
+        } catch (e: Exception) {
+            Log.e("UploadPhoto", "Exceção no upload: ${e.message}", e)
+            withContext(Dispatchers.Main) {
+                Toast.makeText(applicationContext, "Erro de conexão ao enviar foto", Toast.LENGTH_SHORT).show()
+            }
+            e.printStackTrace()
+        }
     }
 
     private fun fetchAssignment() {
@@ -601,7 +644,9 @@ class StartRoute : AppCompatActivity() {
     private fun startLocationUpdates() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
         val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10000).build()
-        try { fusedLocationClient.requestLocationUpdates(req, locationCallback, Looper.getMainLooper()) } catch (e: Exception) {}
+        try {
+            fusedLocationClient.requestLocationUpdates(req, locationCallback, android.os.Looper.getMainLooper())
+        } catch (e: Exception) {}
     }
 
     private fun stopLocationUpdates() {
@@ -616,12 +661,12 @@ class StartRoute : AppCompatActivity() {
 
     private fun applyUiState() {
         if (routeStarted) {
-            btStart.visibility = android.view.View.GONE
-            btFinish.visibility = android.view.View.VISIBLE
+            btStart.visibility = View.GONE
+            btFinish.visibility = View.VISIBLE
             btActions.isEnabled = true
         } else {
-            btStart.visibility = android.view.View.VISIBLE
-            btFinish.visibility = android.view.View.GONE
+            btStart.visibility = View.VISIBLE
+            btFinish.visibility = View.GONE
             btActions.isEnabled = false
         }
     }
@@ -630,14 +675,12 @@ class StartRoute : AppCompatActivity() {
         outState.putBoolean("route_started", routeStarted)
         outState.putLong("exec_local_id", execLocalId)
         if (currentAssignmentId != null) outState.putLong("assignment_id", currentAssignmentId!!)
-
         outState.putString("photo_path", currentPhotoPath)
         outState.putString("pending_type", pendingEventType)
         outState.putString("pending_desc", pendingDesc)
         if (pendingPointId != null) outState.putLong("pending_point_id", pendingPointId!!)
         if (pendingWeight != null) outState.putDouble("pending_weight", pendingWeight!!)
         outState.putString("pending_cond", pendingCondition)
-
         super.onSaveInstanceState(outState)
     }
 }
