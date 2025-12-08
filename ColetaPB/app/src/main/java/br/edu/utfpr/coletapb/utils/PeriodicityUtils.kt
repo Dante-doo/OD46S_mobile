@@ -48,6 +48,10 @@ object PeriodicityUtils {
             val currentDayOfWeek = calendar.get(Calendar.DAY_OF_WEEK)
             
             // Converte para formato cron (0=domingo, 1=segunda, etc)
+            // Calendar.SUNDAY = 1 -> cron 0
+            // Calendar.MONDAY = 2 -> cron 1
+            // Calendar.TUESDAY = 3 -> cron 2
+            // etc.
             val cronDayOfWeek = if (currentDayOfWeek == Calendar.SUNDAY) 0 else currentDayOfWeek - 1
             
             // Verifica se o dia atual está na lista de dias permitidos

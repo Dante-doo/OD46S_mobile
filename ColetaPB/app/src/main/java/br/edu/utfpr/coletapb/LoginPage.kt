@@ -14,6 +14,7 @@ import br.edu.utfpr.coletapb.data.local.SharedPreferencesHelper
 import br.edu.utfpr.coletapb.data.model.LoginRequest
 import br.edu.utfpr.coletapb.data.remote.RetrofitClient
 import br.edu.utfpr.coletapb.data.repository.ExecutionRepository
+import br.edu.utfpr.coletapb.data.repository.SyncRepository
 import br.edu.utfpr.coletapb.utils.GpsMonitor
 import com.google.android.material.textfield.TextInputEditText
 import kotlinx.coroutines.Dispatchers
@@ -151,14 +152,86 @@ class LoginPage : AppCompatActivity() {
     private fun checkCurrentExecutionAndNavigate() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                // Primeiro verifica no banco local se há execução em andamento
+                // Verifica primeiro no backend se está online
+                val executionRepo = ExecutionRepository(prefsHelper)
+                val syncRepo = SyncRepository(this@LoginPage, prefsHelper)
+                val isOnline = try {
+                    syncRepo.isOnline()
+                } catch (e: Exception) {
+                    false
+                }
+                
+                // Se está online, verifica no backend primeiro
+                if (isOnline) {
+                    Log.d("LoginPage", "Online: verificando execução no backend primeiro")
+                    val result = executionRepo.getMyCurrentExecution()
+                    
+                    result.fold(
+                        onSuccess = { execution ->
+                            if (execution != null && execution.status == "IN_PROGRESS") {
+                                // Há uma execução em andamento no backend - vai direto para a tela de execução
+                                Log.d("LoginPage", "Execução em andamento encontrada no backend: ${execution.id}")
+                                withContext(Dispatchers.Main) {
+                                    val intent = Intent(this@LoginPage, StartRoute::class.java).apply {
+                                        putExtra("execution_id", execution.id)
+                                        putExtra("route_id", execution.routeId)
+                                        putExtra("route_name", execution.routeName ?: "Rota")
+                                    }
+                                    startActivity(intent)
+                                    finish()
+                                }
+                                return@launch
+                            } else {
+                                // Backend não tem execução - verifica se há execução local "fantasma" para limpar
+                                val db = AppDatabase.getDatabase(this@LoginPage)
+                                val executionDao = db.executionDao()
+                                val localExecution = executionDao.getCurrentExecution()
+                                
+                                if (localExecution != null && localExecution.status == "IN_PROGRESS") {
+                                    // Execução local "fantasma" - marca como COMPLETED
+                                    Log.w("LoginPage", "Execução local IN_PROGRESS encontrada mas backend não tem execução. Marcando como COMPLETED.")
+                                    val fixedExec = localExecution.copy(
+                                        status = "COMPLETED",
+                                        endTimestamp = localExecution.endTimestamp ?: System.currentTimeMillis()
+                                    )
+                                    executionDao.update(fixedExec)
+                                }
+                                
+                                // Não há execução em andamento - vai para lista de assignments
+                                withContext(Dispatchers.Main) {
+                                    navigateToAssignmentList()
+                                }
+                                return@launch
+                            }
+                        },
+                        onFailure = { error ->
+                            Log.e("LoginPage", "Erro ao verificar execução atual no backend: ${error.message}")
+                            
+                            // Se o token foi limpo automaticamente (renovação falhou), não navega
+                            // Apenas deixa a tela de login visível (já está na tela de login)
+                            if (prefsHelper.getToken() == null) {
+                                Log.d("LoginPage", "Token foi limpo automaticamente durante verificação. Mantendo tela de login.")
+                                // Não faz nada - já está na tela de login
+                            } else {
+                                // Em caso de outro erro, vai para lista de assignments
+                                withContext(Dispatchers.Main) {
+                                    navigateToAssignmentList()
+                                }
+                            }
+                            return@launch
+                        }
+                    )
+                }
+                
+                // Se está offline, verifica no banco local
+                Log.d("LoginPage", "Offline: verificando execução local")
                 val db = AppDatabase.getDatabase(this@LoginPage)
                 val executionDao = db.executionDao()
                 val localExecution = executionDao.getCurrentExecution()
                 
                 if (localExecution != null && localExecution.status == "IN_PROGRESS") {
-                    // Há execução local em andamento - navega para StartRoute
-                    Log.d("LoginPage", "Execução local em andamento encontrada: routeId=${localExecution.routeId}, execLocalId=${localExecution.localId}")
+                    // Há execução local em andamento e estamos offline - navega para StartRoute
+                    Log.d("LoginPage", "Execução local em andamento encontrada (offline): routeId=${localExecution.routeId}, execLocalId=${localExecution.localId}")
                     withContext(Dispatchers.Main) {
                         val intent = Intent(this@LoginPage, StartRoute::class.java).apply {
                             putExtra("route_id", localExecution.routeId)
@@ -172,43 +245,23 @@ class LoginPage : AppCompatActivity() {
                     return@launch
                 }
                 
-                // Se não encontrou no local, verifica no backend
-                val executionRepo = ExecutionRepository(prefsHelper)
-                val result = executionRepo.getMyCurrentExecution()
-                
-                result.fold(
-                    onSuccess = { execution ->
-                        if (execution != null && execution.status == "IN_PROGRESS") {
-                            // Há uma execução em andamento no backend - vai direto para a tela de execução
-                            Log.d("LoginPage", "Execução em andamento encontrada no backend: ${execution.id}")
-                            withContext(Dispatchers.Main) {
-                                val intent = Intent(this@LoginPage, StartRoute::class.java).apply {
-                                    putExtra("execution_id", execution.id)
-                                    putExtra("route_id", execution.routeId)
-                                    putExtra("route_name", execution.routeName ?: "Rota")
-                                }
-                                startActivity(intent)
-                                finish()
-                            }
-                        } else {
-                            // Não há execução em andamento - vai para lista de assignments
-                            withContext(Dispatchers.Main) {
-                                navigateToAssignmentList()
-                            }
-                        }
-                    },
-                    onFailure = { error ->
-                        Log.e("LoginPage", "Erro ao verificar execução atual no backend: ${error.message}")
-                        // Em caso de erro, vai para lista de assignments
-                        withContext(Dispatchers.Main) {
-                            navigateToAssignmentList()
-                        }
-                    }
-                )
-            } catch (e: Exception) {
-                Log.e("LoginPage", "Exceção ao verificar execução: ${e.message}", e)
+                // Não encontrou execução local - vai para lista de assignments
                 withContext(Dispatchers.Main) {
                     navigateToAssignmentList()
+                }
+            } catch (e: Exception) {
+                Log.e("LoginPage", "Exceção ao verificar execução: ${e.message}", e)
+                
+                // Se o token foi limpo automaticamente (renovação falhou), não navega
+                // Apenas deixa a tela de login visível (já está na tela de login)
+                if (prefsHelper.getToken() == null) {
+                    Log.d("LoginPage", "Token foi limpo automaticamente durante verificação. Mantendo tela de login.")
+                    // Não faz nada - já está na tela de login
+                } else {
+                    // Em caso de outro erro, vai para lista de assignments
+                    withContext(Dispatchers.Main) {
+                        navigateToAssignmentList()
+                    }
                 }
             }
         }

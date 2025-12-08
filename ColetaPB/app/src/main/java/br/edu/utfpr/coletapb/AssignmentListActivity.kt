@@ -47,7 +47,7 @@ class AssignmentListActivity : AppCompatActivity() {
         setContentView(R.layout.activity_assignment_list)
         
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "Rotas Disponíveis"
+        supportActionBar?.title = "Rotas"
         
         prefsHelper = SharedPreferencesHelper(this)
         assignmentRepository = AssignmentRepository(prefsHelper)
@@ -90,7 +90,7 @@ class AssignmentListActivity : AppCompatActivity() {
         val userType = prefsHelper.getUserType()
         val userName = prefsHelper.getUserName()
         tvTitle.text = if (userType == "ADMIN") {
-            "Todas as Rotas Disponíveis"
+            "Todas as Rotas"
         } else {
             "Minhas Rotas"
         }
@@ -219,24 +219,110 @@ class AssignmentListActivity : AppCompatActivity() {
                     },
                     onFailure = { error ->
                         Log.e("AssignmentList", "Erro ao carregar assignments: ${error.message}", error)
-                        Toast.makeText(
-                            this@AssignmentListActivity,
-                            "Erro ao carregar rotas: ${error.message}",
-                            Toast.LENGTH_LONG
-                        ).show()
+                        
+                        // Se o token foi limpo automaticamente (renovação falhou), não mostra erro ao usuário
+                        // Apenas redireciona silenciosamente para o login
+                        if (prefsHelper.getToken() == null) {
+                            Log.d("AssignmentList", "Token foi limpo automaticamente. Redirecionando para login sem mostrar erro.")
+                            val intent = Intent(this@AssignmentListActivity, LoginPage::class.java).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                            }
+                            startActivity(intent)
+                            finish()
+                        } else {
+                            // Token ainda existe - verifica tipo de erro e mostra mensagem apropriada
+                            val errorMessage = error.message ?: "Erro desconhecido"
+                            val isConnectionError = isConnectionError(error)
+                            
+                            if (isConnectionError) {
+                                // Erro de conexão - mostra mensagem clara ao usuário
+                                AlertDialog.Builder(this@AssignmentListActivity)
+                                    .setTitle("Erro de Conexão")
+                                    .setMessage("Não foi possível conectar ao servidor.\n\n" +
+                                            "Por favor, verifique:\n" +
+                                            "• Sua conexão com a internet\n" +
+                                            "• Se o servidor está em execução\n" +
+                                            "• Suas configurações de rede\n\n" +
+                                            "Tente novamente quando a conexão estiver disponível.")
+                                    .setPositiveButton("OK", null)
+                                    .setCancelable(true)
+                                    .show()
+                            } else {
+                                // Outro tipo de erro - mostra mensagem genérica
+                                Toast.makeText(
+                                    this@AssignmentListActivity,
+                                    "Erro ao carregar rotas: $errorMessage",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
                     }
                 )
             } catch (e: Exception) {
                 Log.e("AssignmentList", "Exceção ao carregar assignments: ${e.message}", e)
-                Toast.makeText(
-                    this@AssignmentListActivity,
-                    "Erro: ${e.message}",
-                    Toast.LENGTH_LONG
-                ).show()
+                
+                // Se o token foi limpo automaticamente, não mostra erro ao usuário
+                if (prefsHelper.getToken() == null) {
+                    Log.d("AssignmentList", "Token foi limpo automaticamente. Redirecionando para login sem mostrar erro.")
+                    val intent = Intent(this@AssignmentListActivity, LoginPage::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                    }
+                    startActivity(intent)
+                    finish()
+                } else {
+                    // Token ainda existe - verifica tipo de erro e mostra mensagem apropriada
+                    val errorMessage = e.message ?: "Erro desconhecido"
+                    val isConnectionError = isConnectionError(e)
+                    
+                    if (isConnectionError) {
+                        // Erro de conexão - mostra mensagem clara ao usuário
+                        AlertDialog.Builder(this@AssignmentListActivity)
+                            .setTitle("Erro de Conexão")
+                            .setMessage("Não foi possível conectar ao servidor.\n\n" +
+                                    "Por favor, verifique:\n" +
+                                    "• Sua conexão com a internet\n" +
+                                    "• Se o servidor está em execução\n" +
+                                    "• Suas configurações de rede\n\n" +
+                                    "Tente novamente quando a conexão estiver disponível.")
+                            .setPositiveButton("OK", null)
+                            .setCancelable(true)
+                            .show()
+                    } else {
+                        // Outro tipo de erro - mostra mensagem genérica
+                        Toast.makeText(
+                            this@AssignmentListActivity,
+                            "Erro: $errorMessage",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
             } finally {
                 isLoadingAssignments = false
             }
         }
+    }
+    
+    /**
+     * Verifica se um erro é relacionado a problemas de conexão com o servidor
+     */
+    private fun isConnectionError(error: Throwable): Boolean {
+        val errorMessage = error.message ?: ""
+        val errorClass = error.javaClass.simpleName
+        
+        // Verifica se é uma exceção de conexão conhecida
+        return error is java.net.ConnectException ||
+               error is java.net.SocketTimeoutException ||
+               error is java.net.UnknownHostException ||
+               error is java.io.IOException ||
+               errorMessage.contains("Failed to connect", ignoreCase = true) ||
+               errorMessage.contains("Connection refused", ignoreCase = true) ||
+               errorMessage.contains("timeout", ignoreCase = true) ||
+               errorMessage.contains("Unable to resolve host", ignoreCase = true) ||
+               errorMessage.contains("Network is unreachable", ignoreCase = true) ||
+               errorMessage.contains("No route to host", ignoreCase = true) ||
+               errorClass.contains("ConnectException", ignoreCase = true) ||
+               errorClass.contains("SocketTimeoutException", ignoreCase = true) ||
+               errorClass.contains("UnknownHostException", ignoreCase = true)
     }
     
     /**

@@ -26,7 +26,11 @@ data class Execution(
     @SerializedName("end_lat")
     val endLat: Double?,
     @SerializedName("end_lng")
-    val endLng: Double?
+    val endLng: Double?,
+    @SerializedName("executor_id")
+    val executorId: Long? = null,
+    @SerializedName("executor_type")
+    val executorType: String? = null
 )
 
 data class ExecutionRequest(

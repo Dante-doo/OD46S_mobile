@@ -55,7 +55,9 @@ class ExecutionRepository(private val prefsHelper: SharedPreferencesHelper) {
                             startLat = (execData["startLat"] as? Number)?.toDouble(),
                             startLng = (execData["startLng"] as? Number)?.toDouble(),
                             endLat = (execData["endLat"] as? Number)?.toDouble(),
-                            endLng = (execData["endLng"] as? Number)?.toDouble()
+                            endLng = (execData["endLng"] as? Number)?.toDouble(),
+                            executorId = (execData["executorId"] as? Number)?.toLong(),
+                            executorType = execData["executorType"] as? String
                         )
                     } catch (e: Exception) {
                         Log.e("ExecutionRepository", "Erro ao mapear execution: ${e.message}", e)
@@ -146,7 +148,9 @@ class ExecutionRepository(private val prefsHelper: SharedPreferencesHelper) {
                             startLat = (execData["startLat"] as? Number)?.toDouble(),
                             startLng = (execData["startLng"] as? Number)?.toDouble(),
                             endLat = (execData["endLat"] as? Number)?.toDouble(),
-                            endLng = (execData["endLng"] as? Number)?.toDouble()
+                            endLng = (execData["endLng"] as? Number)?.toDouble(),
+                            executorId = (execData["executorId"] as? Number)?.toLong(),
+                            executorType = execData["executorType"] as? String
                         )
                     } catch (e: Exception) {
                         Log.e("ExecutionRepository", "Erro ao mapear execution: ${e.message}", e)
@@ -228,7 +232,9 @@ class ExecutionRepository(private val prefsHelper: SharedPreferencesHelper) {
                             startLat = (execData["startLat"] as? Number)?.toDouble(),
                             startLng = (execData["startLng"] as? Number)?.toDouble(),
                             endLat = (execData["endLat"] as? Number)?.toDouble(),
-                            endLng = (execData["endLng"] as? Number)?.toDouble()
+                            endLng = (execData["endLng"] as? Number)?.toDouble(),
+                            executorId = (execData["executorId"] as? Number)?.toLong(),
+                            executorType = execData["executorType"] as? String
                         )
                     } catch (e: Exception) {
                         Log.e("ExecutionRepository", "Erro ao mapear execution: ${e.message}", e)
@@ -289,7 +295,9 @@ class ExecutionRepository(private val prefsHelper: SharedPreferencesHelper) {
                             startLat = (execData["startLat"] as? Number)?.toDouble(),
                             startLng = (execData["startLng"] as? Number)?.toDouble(),
                             endLat = (execData["endLat"] as? Number)?.toDouble(),
-                            endLng = (execData["endLng"] as? Number)?.toDouble()
+                            endLng = (execData["endLng"] as? Number)?.toDouble(),
+                            executorId = (execData["executorId"] as? Number)?.toLong(),
+                            executorType = execData["executorType"] as? String
                         )
                     } catch (e: Exception) {
                         Log.e("ExecutionRepository", "Erro ao mapear execution atual: ${e.message}", e)

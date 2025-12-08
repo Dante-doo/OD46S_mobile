@@ -181,6 +181,7 @@ class EndRouteDialog : DialogFragment() {
                         completeResult.fold(
                             onSuccess = {
                                 Toast.makeText(requireContext(), "Rota encerrada com sucesso!", Toast.LENGTH_SHORT).show()
+                                // Chama callback para parar o serviço GPS
                                 onRouteEnded?.invoke()
                                 dismiss()
                             },

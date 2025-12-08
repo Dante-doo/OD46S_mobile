@@ -176,11 +176,18 @@ object DateUtils {
     }
     
     /**
-     * Converte uma data local para string ISO 8601 em UTC
+     * Converte uma data (Date representa momento no tempo, sem timezone) 
+     * para string ISO 8601 em UTC (formato: yyyy-MM-ddTHH:mm:ss.SSSZ)
+     * 
+     * Nota: Date em Java/Kotlin é timezone-agnostic (apenas millis desde epoch UTC).
+     * Este método formata o momento representado pelo Date como se fosse UTC,
+     * que é o formato esperado pelo backend.
      */
     fun formatLocalToUtc(date: Date?): String? {
         if (date == null) return null
         
+        // Formata o Date (momento no tempo) como string UTC
+        // O Date já representa o momento correto, apenas formatamos como UTC
         val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
         format.timeZone = TimeZone.getTimeZone("UTC")
         

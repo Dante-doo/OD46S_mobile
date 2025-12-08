@@ -148,22 +148,79 @@ class StartRouteDialog : DialogFragment() {
             return
         }
         
-        if (currentLocation == null) {
-            AlertDialog.Builder(requireContext())
-                .setTitle("Erro")
-                .setMessage("Erro: localização não disponível")
-                .setPositiveButton("OK", null)
-                .show()
-            return
-        }
-        
         // Mostrar loading
         btnStart.isEnabled = false
-        btnStart.text = "Iniciando..."
+        btnStart.text = "Obtendo localização..."
         
         CoroutineScope(Dispatchers.Main).launch {
             try {
-                // 0. Validar periodicity antes de iniciar
+                // 0. OBTER LOCALIZAÇÃO ATUAL (obrigatório antes de iniciar)
+                Log.d(TAG, "=== OBTENDO LOCALIZAÇÃO ATUAL ===")
+                val location = withContext(Dispatchers.IO) {
+                    try {
+                        // Tenta obter localização atual usando FusedLocationProviderClient
+                        val fusedLocationClient = com.google.android.gms.location.LocationServices
+                            .getFusedLocationProviderClient(requireContext())
+                        
+                        // Usa getCurrentLocation com PRIORITY_HIGH_ACCURACY
+                        val locationResult = com.google.android.gms.tasks.Tasks.await(
+                            fusedLocationClient.getCurrentLocation(
+                                com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY,
+                                null
+                            )
+                        )
+                        
+                        if (locationResult != null) {
+                            Log.d(TAG, "✅ Localização obtida via FusedLocationProviderClient: lat=${locationResult.latitude}, lng=${locationResult.longitude}, accuracy=${locationResult.accuracy}m")
+                            locationResult
+                        } else {
+                            Log.w(TAG, "⚠️ getCurrentLocation retornou null, tentando usar currentLocation do dialog")
+                            // Se getCurrentLocation retornou null, tenta usar a localização já disponível no dialog
+                            if (currentLocation != null) {
+                                Log.d(TAG, "Usando currentLocation do dialog: lat=${currentLocation!!.latitude}, lng=${currentLocation!!.longitude}")
+                                currentLocation
+                            } else {
+                                null
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "❌ Erro ao obter localização via FusedLocationProviderClient: ${e.message}", e)
+                        // Se falhar, tenta usar a localização já disponível no dialog
+                        if (currentLocation != null) {
+                            Log.d(TAG, "Usando currentLocation do dialog como fallback: lat=${currentLocation!!.latitude}, lng=${currentLocation!!.longitude}")
+                            currentLocation
+                        } else {
+                            null
+                        }
+                    }
+                }
+                
+                if (location == null) {
+                    Log.e(TAG, "❌ Não foi possível obter localização atual")
+                    AlertDialog.Builder(requireContext())
+                        .setTitle("Erro de Localização")
+                        .setMessage("Não foi possível obter sua localização atual.\n\n" +
+                                "Por favor, verifique:\n" +
+                                "• Se o GPS está habilitado\n" +
+                                "• Se as permissões de localização foram concedidas\n" +
+                                "• Se você está em uma área com sinal GPS\n\n" +
+                                "Tente novamente após verificar essas condições.")
+                        .setPositiveButton("OK") { _, _ ->
+                            btnStart.isEnabled = true
+                            btnStart.text = "INICIAR"
+                        }
+                        .setCancelable(true)
+                        .show()
+                    return@launch
+                }
+                
+                // Atualiza currentLocation com a localização obtida
+                currentLocation = location
+                Log.d(TAG, "✅ Localização confirmada: lat=${location.latitude}, lng=${location.longitude}, accuracy=${location.accuracy}m")
+                
+                btnStart.text = "Iniciando..."
+                
+                // 1. Validar periodicity antes de iniciar
                 val assignmentResult = withContext(Dispatchers.IO) {
                     assignmentRepository.getMyAssignments()
                 }
@@ -171,15 +228,22 @@ class StartRouteDialog : DialogFragment() {
                 val assignment = assignmentResult.getOrNull()?.find { it.id == assignmentId }
                 
                 if (assignment != null && !assignment.periodicity.isNullOrBlank()) {
-                    val isAllowed = PeriodicityUtils.isTodayAllowed(assignment.periodicity)
+                    val periodicity = assignment.periodicity
+                    Log.d(TAG, "Validando periodicity: $periodicity")
+                    
+                    val isAllowed = PeriodicityUtils.isTodayAllowed(periodicity)
+                    Log.d(TAG, "Periodicity validation result: isAllowed=$isAllowed")
+                    
                     if (!isAllowed) {
-                        val allowedDays = PeriodicityUtils.formatPeriodicity(assignment.periodicity)
-                        val allowedDaysList = PeriodicityUtils.getAllowedDays(assignment.periodicity)
+                        val allowedDays = PeriodicityUtils.formatPeriodicity(periodicity)
+                        val allowedDaysList = PeriodicityUtils.getAllowedDays(periodicity)
                         val allowedDaysStr = if (allowedDaysList.isNotEmpty()) {
                             allowedDaysList.joinToString(", ")
                         } else {
                             allowedDays
                         }
+                        
+                        Log.w(TAG, "Rota não pode ser iniciada hoje. Dias permitidos: $allowedDaysStr")
                         
                         AlertDialog.Builder(requireContext())
                             .setTitle("Rota não disponível hoje")
@@ -193,19 +257,23 @@ class StartRouteDialog : DialogFragment() {
                         btnStart.isEnabled = true
                         btnStart.text = "INICIAR"
                         return@launch
+                    } else {
+                        Log.d(TAG, "Periodicity validation passed, continuando com início da rota")
                     }
+                } else {
+                    Log.d(TAG, "Nenhuma periodicity definida ou assignment não encontrado, permitindo início")
                 }
                 
-                // 1. Chamar POST /api/v1/executions/start
-                Log.d(TAG, "=== INICIANDO ROTA ===")
+                // 2. Chamar POST /api/v1/executions/start
+                Log.d(TAG, "=== INICIANDO ROTA NO BACKEND ===")
                 Log.d(TAG, "assignmentId: $assignmentId")
-                Log.d(TAG, "location: lat=${currentLocation!!.latitude}, lng=${currentLocation!!.longitude}")
+                Log.d(TAG, "location: lat=${location.latitude}, lng=${location.longitude}")
                 
                 val startResult = withContext(Dispatchers.IO) {
                     executionRepository.startExecution(
                         assignmentId = assignmentId!!,
-                        startLat = currentLocation!!.latitude,
-                        startLng = currentLocation!!.longitude
+                        startLat = location.latitude,
+                        startLng = location.longitude
                     )
                 }
                 
@@ -266,38 +334,56 @@ class StartRouteDialog : DialogFragment() {
                     }
                 )
                 
-                // 2. Enviar evento START
-                val speedKmh = if (currentLocation!!.hasSpeed()) {
-                    currentLocation!!.speed * 3.6
+                // 3. Enviar evento START para /api/v1/executions/:executionId/gps
+                // OBRIGATÓRIO: Se falhar, a rota deve ser cancelada
+                val speedKmh = if (location.hasSpeed()) {
+                    location.speed * 3.6
                 } else null
                 
-                val headingDegrees = if (currentLocation!!.hasBearing()) {
-                    currentLocation!!.bearing.toDouble()
+                val headingDegrees = if (location.hasBearing()) {
+                    location.bearing.toDouble()
                 } else null
                 
-                val accuracyMeters = if (currentLocation!!.hasAccuracy()) {
-                    currentLocation!!.accuracy.toDouble()
+                val accuracyMeters = if (location.hasAccuracy()) {
+                    location.accuracy.toDouble()
                 } else null
                 
-                Log.d(TAG, "Enviando evento START para execução: $executionId")
+                Log.d(TAG, "=== ENVIANDO EVENTO START ===")
+                Log.d(TAG, "executionId: $executionId")
+                Log.d(TAG, "latitude: ${location.latitude}, longitude: ${location.longitude}")
+                Log.d(TAG, "speedKmh: $speedKmh, headingDegrees: $headingDegrees, accuracyMeters: $accuracyMeters")
+                Log.d(TAG, "eventType: ${GpsEventType.START.apiValue}")
+                Log.d(TAG, "isAutomatic: false, isOffline: false")
+                
+                btnStart.text = "Registrando início..."
+                
                 val startEventResult = withContext(Dispatchers.IO) {
-                    gpsRepository.registerGpsPosition(
-                        executionId = executionId,
-                        latitude = currentLocation!!.latitude,
-                        longitude = currentLocation!!.longitude,
-                        speedKmh = speedKmh,
-                        headingDegrees = headingDegrees,
-                        accuracyMeters = accuracyMeters,
-                        eventType = GpsEventType.START.apiValue,
-                        isAutomatic = false,
-                        isOffline = false,
-                        description = "Início da coleta"
-                    )
+                    try {
+                        Log.d(TAG, "Chamando gpsRepository.registerGpsPosition()...")
+                        val result = gpsRepository.registerGpsPosition(
+                            executionId = executionId,
+                            latitude = location.latitude,
+                            longitude = location.longitude,
+                            speedKmh = speedKmh,
+                            headingDegrees = headingDegrees,
+                            accuracyMeters = accuracyMeters,
+                            eventType = GpsEventType.START.apiValue,
+                            isAutomatic = false,
+                            isOffline = false,
+                            description = "Início da coleta"
+                        )
+                        Log.d(TAG, "gpsRepository.registerGpsPosition() retornou: $result")
+                        result
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Exceção ao chamar registerGpsPosition: ${e.message}", e)
+                        Result.failure(e)
+                    }
                 }
                 
+                Log.d(TAG, "startEventResult recebido, processando...")
                 startEventResult.fold(
                     onSuccess = { record ->
-                        Log.d(TAG, "✅ Evento START enviado com sucesso: id=${record.id}")
+                        Log.d(TAG, "✅ Evento START enviado com sucesso: id=${record.id}, eventType=${record.eventType}")
                         // 3. Iniciar loop de NORMAL a cada 15 segundos
                         startNormalLoop(executionId)
                         
@@ -313,20 +399,62 @@ class StartRouteDialog : DialogFragment() {
                             .show()
                     },
                     onFailure = { error ->
-                        Log.e(TAG, "Erro ao enviar evento START: ${error.message}", error)
-                        // Mesmo com erro no START, continua o fluxo (o evento foi salvo localmente)
-                        // Mas mostra o erro para o usuário saber
-                        AlertDialog.Builder(requireContext())
-                            .setTitle("Aviso")
-                            .setMessage("Rota iniciada, mas houve um problema ao enviar o evento START ao servidor: ${error.message}\n\nOs dados foram salvos localmente e serão sincronizados quando possível.")
-                            .setPositiveButton("OK") { _, _ ->
-                                // Continua o fluxo mesmo com erro
-                                startNormalLoop(executionId)
-                                onRouteStarted?.invoke(executionId)
-                                dismiss()
+                        Log.e(TAG, "❌ Erro ao enviar evento START: ${error.message}", error)
+                        Log.e(TAG, "Stack trace:", error)
+                        
+                        // OBRIGATÓRIO: Se o START não foi registrado, a rota DEVE ser cancelada
+                        // Cancela a execução criada no backend para evitar estado inconsistente
+                        var cancelSuccess = false
+                        withContext(Dispatchers.IO) {
+                            try {
+                                Log.d(TAG, "Cancelando execução $executionId devido a falha no registro do evento START...")
+                                val cancelResult = executionRepository.cancelExecution(
+                                    executionId, 
+                                    "Erro ao registrar evento START: ${error.message}"
+                                )
+                                cancelResult.fold(
+                                    onSuccess = {
+                                        Log.d(TAG, "✅ Execução cancelada no backend devido a falha no START")
+                                        cancelSuccess = true
+                                    },
+                                    onFailure = { cancelError ->
+                                        Log.e(TAG, "❌ Erro ao cancelar execução: ${cancelError.message}", cancelError)
+                                        cancelSuccess = false
+                                    }
+                                )
+                            } catch (cancelError: Exception) {
+                                Log.e(TAG, "❌ Exceção ao cancelar execução: ${cancelError.message}", cancelError)
+                                cancelSuccess = false
                             }
-                            .setCancelable(false)
+                        }
+                        
+                        // Notifica o usuário sobre o problema com localização
+                        val cancelMessage = if (cancelSuccess) {
+                            "A rota foi cancelada automaticamente."
+                        } else {
+                            "Atenção: Não foi possível cancelar a rota automaticamente. Entre em contato com o suporte."
+                        }
+                        
+                        AlertDialog.Builder(requireContext())
+                            .setTitle("Erro ao Iniciar Rota")
+                            .setMessage("Não foi possível registrar o evento de início da rota no servidor.\n\n" +
+                                    "Possíveis causas:\n" +
+                                    "• Problema com a localização GPS\n" +
+                                    "• Falha na conexão com o servidor\n" +
+                                    "• Erro: ${error.message}\n\n" +
+                                    "$cancelMessage\n\n" +
+                                    "Por favor, verifique sua conexão e localização GPS, e tente novamente.")
+                            .setPositiveButton("OK") { _, _ ->
+                                // Não chama onRouteStarted - a rota não foi iniciada
+                                // Não inicia o loop de NORMAL
+                                // Permite que o usuário tente novamente
+                            }
+                            .setCancelable(true)
                             .show()
+                        
+                        // Reabilita o botão para permitir nova tentativa
+                        btnStart.isEnabled = true
+                        btnStart.text = "INICIAR"
                     }
                 )
             } catch (e: Exception) {
@@ -397,4 +525,5 @@ class StartRouteDialog : DialogFragment() {
         normalLoopJob?.cancel()
     }
 }
+
 

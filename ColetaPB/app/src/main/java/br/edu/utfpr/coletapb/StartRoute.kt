@@ -17,6 +17,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -53,9 +54,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import br.edu.utfpr.coletapb.utils.DateUtils
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
@@ -141,8 +142,7 @@ class StartRoute : AppCompatActivity() {
     private var routeName: String? = null
     private var routeInfo: String? = null
 
-    private val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
-    private val sdfTime = SimpleDateFormat("HH:mm", Locale.getDefault())
+    // Nota: Para formatação de datas, usar DateUtils que já trata timezone corretamente
     
     // Activity Result Launcher para lista de pontos
     private lateinit var pointsListLauncher: androidx.activity.result.ActivityResultLauncher<Intent>
@@ -173,8 +173,15 @@ class StartRoute : AppCompatActivity() {
         val toolbar = findViewById<MaterialToolbar>(R.id.topAppBar)
         toolbar.title = routeName ?: "Iniciar rota"
         toolbar.setNavigationOnClickListener {
-            onBackPressedDispatcher.onBackPressed()
+            handleBackPress()
         }
+        
+        // Configura callback para botão voltar do sistema
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                handleBackPress()
+            }
+        })
 
         // Inicializa componentes do novo layout
         tvRouteName = findViewById(R.id.tvRouteName)
@@ -923,14 +930,14 @@ class StartRoute : AppCompatActivity() {
                                     backendExecutionId = backendExec.id
                                     Log.d("StartRoute", "Execução encontrada no backend: id=${backendExec.id}, routeId=${backendExec.routeId}, assignmentId=${backendExec.assignmentId}, status=IN_PROGRESS")
 
+                                    // Converte timestamp do backend (UTC) para millis local
                                     val startTimestamp = try {
-                                        backendExec.startTime?.let {
-                                            java.text.SimpleDateFormat(
-                                                "yyyy-MM-dd'T'HH:mm:ss",
-                                                java.util.Locale.getDefault()
-                                            ).parse(it)?.time
+                                        backendExec.startTime?.let { utcString ->
+                                            // Backend envia em UTC, converte para Date e depois para millis
+                                            DateUtils.parseUtcToLocal(utcString)?.time
                                         } ?: System.currentTimeMillis()
                                     } catch (e: Exception) {
+                                        Log.e("StartRoute", "Erro ao converter startTime do backend: ${e.message}", e)
                                         System.currentTimeMillis()
                                     }
 
@@ -984,13 +991,13 @@ class StartRoute : AppCompatActivity() {
                                     if (currentExec != null && currentExec.backendId == backendExec.id) {
                                         val updatedExec = currentExec.copy(
                                             status = execStatus,
-                                            endTimestamp = backendExec.endTime?.let {
+                                            // Converte timestamp do backend (UTC) para millis local
+                                            endTimestamp = backendExec.endTime?.let { utcString ->
                                                 try {
-                                                    java.text.SimpleDateFormat(
-                                                        "yyyy-MM-dd'T'HH:mm:ss",
-                                                        java.util.Locale.getDefault()
-                                                    ).parse(it)?.time
+                                                    // Backend envia em UTC, converte para Date e depois para millis
+                                                    DateUtils.parseUtcToLocal(utcString)?.time
                                                 } catch (e: Exception) {
+                                                    Log.e("StartRoute", "Erro ao converter endTime do backend: ${e.message}", e)
                                                     null
                                                 }
                                             } ?: currentExec.endTimestamp
@@ -1008,21 +1015,50 @@ class StartRoute : AppCompatActivity() {
                                 // ❌ Backend NÃO tem execução em andamento para esta rota
                                 Log.d("StartRoute", "Nenhuma execução no backend para esta rota (routeId=$routeId, assignmentId=$assignmentId)")
 
+                                // Quando ONLINE, não devemos considerar execução local como válida
+                                // a menos que seja realmente offline (backendId == null)
                                 // Tenta restaurar apenas rota OFFLINE local (backendId == null)
                                 val restoredOffline = tryRestoreOfflineExecutionForCurrentRoute()
 
                                 if (!restoredOffline) {
                                     // Nenhuma rota offline válida -> zera estado local
+                                    // Se não tem assignmentId válido, redireciona para menu de rotas
                                     withContext(Dispatchers.Main) {
                                         routeStarted = false
                                         execLocalId = 0L
                                         backendExecutionId = null
-                                        applyUiState()
+                                        
+                                        // Se não tem assignmentId válido, não há como iniciar a rota
+                                        // Redireciona para o menu de rotas
+                                        if (assignmentId <= 0L) {
+                                            Log.d("StartRoute", "Sem assignmentId válido e sem rota em andamento. Redirecionando para menu de rotas.")
+                                            val intent = Intent(this@StartRoute, AssignmentListActivity::class.java).apply {
+                                                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+                                            }
+                                            startActivity(intent)
+                                            finish()
+                                        } else {
+                                            // Tem assignmentId, pode iniciar rota - apenas atualiza UI
+                                            applyUiState()
+                                        }
                                     }
                                 }
                             }
                         },
                         onFailure = { error ->
+                            // Se o token foi limpo automaticamente (renovação falhou), redireciona para login
+                            if (prefsHelper.getToken() == null) {
+                                Log.d("StartRoute", "Token foi limpo automaticamente. Redirecionando para login sem mostrar erro.")
+                                withContext(Dispatchers.Main) {
+                                    val intent = Intent(this@StartRoute, LoginPage::class.java).apply {
+                                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                                    }
+                                    startActivity(intent)
+                                    finish()
+                                }
+                                return@launch
+                            }
+                            
                             // Erro ao falar com backend -> cai para modo "offline" usando banco local
                             Log.w("StartRoute", "Erro ao consultar backend: ${error.message}. Usando apenas dados locais.")
                             val restored = tryRestoreLocalExecutionForCurrentRoute()
@@ -1703,8 +1739,10 @@ class StartRoute : AppCompatActivity() {
             )
             
             dialog.onRouteEnded = {
-                // Navegar após encerrar (já implementado em finishRoute)
-                Log.d("StartRoute", "Rota encerrada via EndRouteDialog, navegando...")
+                // Para o rastreamento GPS antes de navegar
+                Log.d("StartRoute", "Rota encerrada via EndRouteDialog, parando GPS tracking...")
+                stopGpsTracking()
+                // Navegar após encerrar
                 navigateAfterFinish()
             }
             
@@ -1869,36 +1907,60 @@ class StartRoute : AppCompatActivity() {
      */
     private fun navigateAfterFinish() {
         try {
+            // Verifica se há uma AssignmentListActivity na pilha de activities
+            // Se não houver, cria uma nova e não finaliza a StartRoute para que o usuário possa voltar
+            val hasAssignmentListInStack = isTaskRoot.not() && 
+                (intent.flags and Intent.FLAG_ACTIVITY_NEW_TASK) == 0
+            
             if (backendExecutionId != null) {
                 // Navega para resumo da execução
                 val intent = Intent(this, ExecutionSummaryActivity::class.java).apply {
                     putExtra("execution_id", backendExecutionId)
-                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+                    // Não limpa a pilha para permitir voltar
+                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
                 }
                 startActivity(intent)
             } else {
                 // Se não tem backendId, volta para lista de assignments
                 val intent = Intent(this, AssignmentListActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+                    // Não limpa a pilha para permitir voltar
+                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
                 }
                 startActivity(intent)
             }
-            finish()
+            
+            // Só finaliza se não for a raiz da task (ou seja, se houver outra activity na pilha)
+            // Isso evita que o app feche quando o usuário clicar em voltar
+            if (!isTaskRoot) {
+                finish()
+            } else {
+                // Se é a raiz da task, não finaliza para que o usuário possa voltar
+                Log.d("StartRoute", "StartRoute é a raiz da task, não finalizando para permitir voltar")
+            }
         } catch (e: Exception) {
             Log.e("StartRoute", "Erro ao navegar após finalizar: ${e.message}", e)
-            // Se falhar, pelo menos fecha a tela atual
-            finish()
+            // Se falhar, só finaliza se não for a raiz da task
+            if (!isTaskRoot) {
+                finish()
+            }
         }
     }
 
     // Resumo para o Toast final (sem "paradas")
     private suspend fun buildSummary(id: Long): Triple<String, String, IncidentInfo> {
         val exec = executionDao.getById(id)
-        val startStr = exec?.startTimestamp?.let { sdf.format(Date(it)) } ?: "-"
-        val endStr   = exec?.endTimestamp?.let { sdf.format(Date(it)) } ?: "-"
+        // Formata timestamps usando DateUtils para garantir timezone local
+        val startStr = exec?.startTimestamp?.let { 
+            DateUtils.formatForDisplay(Date(it), "dd/MM/yyyy", "HH:mm:ss")
+        } ?: "-"
+        val endStr = exec?.endTimestamp?.let { 
+            DateUtils.formatForDisplay(Date(it), "dd/MM/yyyy", "HH:mm:ss")
+        } ?: "-"
 
         val incidents = gpsDao.listByExecution(id).filter { it.eventType == "INCIDENT" }
-        val times = incidents.joinToString("\n") { " - ${sdf.format(Date(it.timestamp))}" }
+        val times = incidents.joinToString("\n") { 
+            " - ${DateUtils.formatForDisplay(Date(it.timestamp), "dd/MM/yyyy", "HH:mm:ss")}"
+        }
 
         return Triple(startStr, endStr, IncidentInfo(incidents.size, times))
     }
@@ -3118,7 +3180,11 @@ class StartRoute : AppCompatActivity() {
                     executionDao.getById(execLocalId)?.let { exec ->
                         exec.startTimestamp?.let { timestamp ->
                             withContext(Dispatchers.Main) {
-                                tvStartTime.text = "Iniciada às ${sdfTime.format(Date(timestamp))}"
+                                // timestamp é millis desde epoch, já está no timezone local
+                                // Formata usando DateUtils que garante timezone local
+                                val date = Date(timestamp)
+                                val timeStr = DateUtils.formatTimeOnly(date)
+                                tvStartTime.text = "Iniciada às $timeStr"
                             }
                         }
                     }
@@ -3261,19 +3327,44 @@ class StartRoute : AppCompatActivity() {
         }
     }
 
-    override fun onSupportNavigateUp(): Boolean {
+    /**
+     * Trata o pressionamento do botão voltar
+     */
+    private fun handleBackPress() {
         if (routeStarted) {
+            // Se há rota em andamento, pergunta se deseja sair
             AlertDialog.Builder(this)
                 .setTitle("Atenção")
                 .setMessage("Há uma rota em andamento. Deseja realmente sair?")
                 .setPositiveButton("Sim") { _, _ ->
-                    onBackPressedDispatcher.onBackPressed()
+                    // Navega para AssignmentListActivity ao invés de fechar o app
+                    navigateToAssignmentList()
                 }
                 .setNegativeButton("Não", null)
                 .show()
-            return false
+        } else {
+            // Se não há rota em andamento, navega para AssignmentListActivity
+            navigateToAssignmentList()
         }
-        onBackPressedDispatcher.onBackPressed()
-        return true
+    }
+    
+    /**
+     * Navega para a lista de assignments
+     */
+    private fun navigateToAssignmentList() {
+        val intent = Intent(this, AssignmentListActivity::class.java).apply {
+            // Não limpa a pilha para permitir voltar se necessário
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        startActivity(intent)
+        // Só finaliza se não for a raiz da task
+        if (!isTaskRoot) {
+            finish()
+        }
+    }
+    
+    override fun onSupportNavigateUp(): Boolean {
+        handleBackPress()
+        return false
     }
 }

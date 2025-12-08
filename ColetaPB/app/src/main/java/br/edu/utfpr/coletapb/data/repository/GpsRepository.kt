@@ -146,7 +146,12 @@ class GpsRepository(private val prefsHelper: SharedPreferencesHelper) {
                 }
             } else {
                 val errorBody = response.errorBody()?.string() ?: "Erro desconhecido"
-                Log.e("GpsRepository", "Erro HTTP ${response.code()}: $errorBody")
+                Log.e("GpsRepository", "=== ERRO AO REGISTRAR GPS ===")
+                Log.e("GpsRepository", "HTTP Code: ${response.code()}")
+                Log.e("GpsRepository", "Error Body: $errorBody")
+                Log.e("GpsRepository", "executionId: $executionId")
+                Log.e("GpsRepository", "eventType: $eventType")
+                Log.e("GpsRepository", "latitude: $latitude, longitude: $longitude")
                 
                 // Tenta extrair a mensagem do JSON de erro do backend
                 val errorMessage = try {
@@ -155,9 +160,11 @@ class GpsRepository(private val prefsHelper: SharedPreferencesHelper) {
                     errorObj?.optString("message") ?: json.optString("message") ?: errorBody
                 } catch (e: Exception) {
                     // Se não conseguir parsear como JSON, usa o corpo do erro diretamente
+                    Log.e("GpsRepository", "Erro ao parsear JSON de erro: ${e.message}")
                     errorBody
                 }
                 
+                Log.e("GpsRepository", "Mensagem de erro extraída: $errorMessage")
                 Result.failure(Exception("Erro ao registrar GPS: ${response.code()} - $errorMessage"))
             }
         } catch (e: Exception) {

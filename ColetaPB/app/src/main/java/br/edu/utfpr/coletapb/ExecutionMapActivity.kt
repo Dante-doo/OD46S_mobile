@@ -14,6 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import br.edu.utfpr.coletapb.data.remote.RetrofitClient
 import br.edu.utfpr.coletapb.utils.CustomTileSource
 import br.edu.utfpr.coletapb.utils.SSLHelper
+import br.edu.utfpr.coletapb.utils.DateUtils
 import com.google.android.material.appbar.MaterialToolbar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -178,7 +179,20 @@ class ExecutionMapActivity : AppCompatActivity() {
                     gpsTrack.forEach { record ->
                         val lat = (record["latitude"] as? Number)?.toDouble()
                         val lng = (record["longitude"] as? Number)?.toDouble()
+                        val eventType = record["eventType"] as? String
                         
+                        // Coleta eventos importantes independentemente de serem NORMAL ou não
+                        // Mas só adiciona à lista se tiver coordenadas válidas
+                        if (eventType != null && eventType != "NORMAL") {
+                            if (lat != null && lng != null && lat != 0.0 && lng != 0.0) {
+                                importantEvents.add(record)
+                                Log.d("ExecutionMap", "Evento importante encontrado: $eventType em lat=$lat, lng=$lng")
+                            } else {
+                                Log.w("ExecutionMap", "Evento importante sem coordenadas válidas: $eventType (lat=$lat, lng=$lng)")
+                            }
+                        }
+                        
+                        // Processa pontos GPS para a linha do trajeto
                         if (lat != null && lng != null && lat != 0.0 && lng != 0.0) {
                             val geoPoint = GeoPoint(lat, lng)
                             
@@ -190,44 +204,69 @@ class ExecutionMapActivity : AppCompatActivity() {
                             } else {
                                 Log.d("ExecutionMap", "Ponto duplicado ignorado: lat=$lat, lng=$lng")
                             }
-                            
-                            // Marca eventos importantes
-                            val eventType = record["eventType"] as? String
-                            if (eventType != null && eventType != "NORMAL") {
-                                importantEvents.add(record)
-                            }
                         } else {
                             Log.w("ExecutionMap", "Ponto GPS inválido: lat=$lat, lng=$lng")
                         }
                     }
                     
                     Log.d("ExecutionMap", "Total de pontos GPS válidos processados: ${gpsPoints.size} (de ${gpsTrack.size} registros)")
+                    Log.d("ExecutionMap", "Total de eventos importantes encontrados: ${importantEvents.size}")
                     
                     // Desenha no mapa
                     withContext(Dispatchers.Main) {
-                        if (gpsPoints.isNotEmpty()) {
-                            Log.d("ExecutionMap", "Processados ${gpsPoints.size} pontos GPS válidos")
-                            drawRouteOnMap()
-                            addEventMarkers(importantEvents)
+                        if (gpsPoints.isNotEmpty() || importantEvents.isNotEmpty()) {
+                            Log.d("ExecutionMap", "Processados ${gpsPoints.size} pontos GPS válidos e ${importantEvents.size} eventos importantes")
                             
-                            // Centraliza mapa no trajeto
+                            // Primeiro desenha a rota (polyline)
+                            if (gpsPoints.isNotEmpty()) {
+                                drawRouteOnMap()
+                            }
+                            
+                            // Depois adiciona os marcadores de eventos (para ficarem visíveis sobre a linha)
+                            if (importantEvents.isNotEmpty()) {
+                                addEventMarkers(importantEvents)
+                            }
+                            
+                            // Centraliza mapa no trajeto ou nos eventos
                             try {
-                                if (gpsPoints.size == 1) {
-                                    // Se há apenas um ponto, centraliza nele com zoom fixo
-                                    mapView.controller.setCenter(gpsPoints.first())
-                                    mapView.controller.setZoom(18.0)
-                                    Log.d("ExecutionMap", "Mapa centralizado em ponto único")
+                                val pointsToCenter = if (gpsPoints.isNotEmpty()) {
+                                    gpsPoints
                                 } else {
-                                    // Múltiplos pontos: calcula bounding box
-                                    val bounds = BoundingBox.fromGeoPoints(gpsPoints)
-                                    mapView.zoomToBoundingBox(bounds, false, 50)
-                                    Log.d("ExecutionMap", "Mapa centralizado no trajeto (${gpsPoints.size} pontos)")
+                                    // Se não há pontos GPS, usa as coordenadas dos eventos
+                                    importantEvents.mapNotNull { event ->
+                                        val lat = (event["latitude"] as? Number)?.toDouble()
+                                        val lng = (event["longitude"] as? Number)?.toDouble()
+                                        if (lat != null && lng != null && lat != 0.0 && lng != 0.0) {
+                                            GeoPoint(lat, lng)
+                                        } else null
+                                    }
+                                }
+                                
+                                if (pointsToCenter.isNotEmpty()) {
+                                    if (pointsToCenter.size == 1) {
+                                        // Se há apenas um ponto, centraliza nele com zoom fixo
+                                        mapView.controller.setCenter(pointsToCenter.first())
+                                        mapView.controller.setZoom(18.0)
+                                        Log.d("ExecutionMap", "Mapa centralizado em ponto único")
+                                    } else {
+                                        // Múltiplos pontos: calcula bounding box
+                                        val bounds = BoundingBox.fromGeoPoints(pointsToCenter)
+                                        mapView.zoomToBoundingBox(bounds, false, 50)
+                                        Log.d("ExecutionMap", "Mapa centralizado no trajeto (${pointsToCenter.size} pontos)")
+                                    }
                                 }
                             } catch (e: Exception) {
                                 Log.e("ExecutionMap", "Erro ao centralizar mapa: ${e.message}", e)
-                                // Fallback: centraliza no primeiro ponto
-                                if (gpsPoints.isNotEmpty()) {
-                                    mapView.controller.setCenter(gpsPoints.first())
+                                // Fallback: centraliza no primeiro ponto ou evento
+                                val firstPoint = gpsPoints.firstOrNull() ?: importantEvents.firstOrNull()?.let { event ->
+                                    val lat = (event["latitude"] as? Number)?.toDouble()
+                                    val lng = (event["longitude"] as? Number)?.toDouble()
+                                    if (lat != null && lng != null && lat != 0.0 && lng != 0.0) {
+                                        GeoPoint(lat, lng)
+                                    } else null
+                                }
+                                if (firstPoint != null) {
+                                    mapView.controller.setCenter(firstPoint)
                                     mapView.controller.setZoom(15.0)
                                     Log.d("ExecutionMap", "Mapa centralizado no primeiro ponto (fallback)")
                                 }
@@ -323,6 +362,11 @@ class ExecutionMapActivity : AppCompatActivity() {
         eventMarkers.forEach { mapView.overlays.remove(it) }
         eventMarkers.clear()
         
+        if (events.isEmpty()) {
+            Log.d("ExecutionMap", "Nenhum evento importante para adicionar ao mapa")
+            return
+        }
+        
         events.forEach { record ->
             val lat = (record["latitude"] as? Number)?.toDouble()
             val lng = (record["longitude"] as? Number)?.toDouble()
@@ -330,7 +374,7 @@ class ExecutionMapActivity : AppCompatActivity() {
             val description = record["description"] as? String ?: ""
             val timestamp = record["gpsTimestamp"] as? String
             
-            if (lat != null && lng != null && eventType != null) {
+            if (lat != null && lng != null && lat != 0.0 && lng != 0.0 && eventType != null) {
                 val drawable = getEventIcon(eventType)
                 
                 val marker = Marker(mapView).apply {
@@ -338,7 +382,7 @@ class ExecutionMapActivity : AppCompatActivity() {
                     
                     // Define ícone baseado no tipo de evento
                     drawable?.let {
-                        val size = (48 * resources.displayMetrics.density).toInt()
+                        val size = (64 * resources.displayMetrics.density).toInt()
                         it.setBounds(0, 0, size, size)
                         icon = it
                     }
@@ -355,39 +399,63 @@ class ExecutionMapActivity : AppCompatActivity() {
                     }
                     
                     title = eventName
+                    
+                    // Formata timestamp do backend (UTC) para timezone local
+                    val formattedTimestamp = timestamp?.let { ts ->
+                        try {
+                            // Backend envia em UTC (formato ISO 8601), converte para timezone local
+                            val date = DateUtils.parseUtcToLocal(ts)
+                            date?.let { 
+                                DateUtils.formatForDisplay(it, "dd/MM/yyyy", "HH:mm:ss")
+                            } ?: ts
+                        } catch (e: Exception) {
+                            Log.e("ExecutionMap", "Erro ao formatar timestamp: ${e.message}", e)
+                            ts
+                        }
+                    } ?: ""
+                    
                     snippet = if (description.isNotEmpty()) {
-                        "$description${if (timestamp != null) "\n$timestamp" else ""}"
+                        "$description${if (formattedTimestamp.isNotEmpty()) "\n$formattedTimestamp" else ""}"
                     } else {
-                        timestamp ?: ""
+                        formattedTimestamp
                     }
                     
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    
+                    // Torna o marcador mais visível
+                    isDraggable = false
                 }
                 
                 mapView.overlays.add(marker)
                 eventMarkers.add(marker)
+                Log.d("ExecutionMap", "Marcador adicionado: $eventType em lat=$lat, lng=$lng")
+            } else {
+                Log.w("ExecutionMap", "Evento ignorado (coordenadas inválidas): $eventType (lat=$lat, lng=$lng)")
             }
         }
         
-        mapView.invalidate()
-        Log.d("ExecutionMap", "Adicionados ${eventMarkers.size} marcadores de eventos")
+        // Força atualização do mapa
+        mapView.post {
+            mapView.invalidate()
+            Log.d("ExecutionMap", "Adicionados ${eventMarkers.size} marcadores de eventos ao mapa")
+        }
     }
     
     /**
      * Retorna o ícone apropriado para o tipo de evento
      */
     private fun getEventIcon(eventType: String): Drawable? {
-        val iconRes = when (eventType) {
-            "START" -> android.R.drawable.ic_menu_mylocation
-            "END" -> android.R.drawable.ic_menu_close_clear_cancel
-            "POINT_COLLECTED" -> android.R.drawable.ic_menu_compass
-            "PROBLEM" -> android.R.drawable.ic_dialog_alert
-            "STOP", "BREAK" -> android.R.drawable.ic_menu_recent_history
-            else -> android.R.drawable.ic_menu_mylocation
+        val (iconRes, colorRes) = when (eventType) {
+            "START" -> android.R.drawable.ic_menu_mylocation to android.R.color.holo_green_dark
+            "END" -> android.R.drawable.ic_menu_close_clear_cancel to android.R.color.holo_red_dark
+            "POINT_COLLECTED" -> android.R.drawable.ic_menu_compass to android.R.color.holo_blue_dark
+            "PROBLEM" -> android.R.drawable.ic_dialog_alert to android.R.color.holo_red_dark
+            "STOP", "BREAK" -> android.R.drawable.ic_menu_recent_history to android.R.color.holo_orange_dark
+            else -> android.R.drawable.ic_menu_mylocation to android.R.color.holo_blue_dark
         }
         
         return ContextCompat.getDrawable(this, iconRes)?.apply {
-            setTint(ContextCompat.getColor(this@ExecutionMapActivity, android.R.color.holo_red_dark))
+            setTint(ContextCompat.getColor(this@ExecutionMapActivity, colorRes))
         }
     }
     

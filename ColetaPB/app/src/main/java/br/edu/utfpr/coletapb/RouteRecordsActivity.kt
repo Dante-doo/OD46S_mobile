@@ -18,9 +18,7 @@ import com.google.android.material.appbar.MaterialToolbar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+// DateUtils já importado implicitamente através do uso completo do caminho
 
 /**
  * Tela que exibe os registros (eventos GPS) da execução atual em andamento
@@ -127,14 +125,13 @@ class RouteRecordsActivity : AppCompatActivity() {
                         val collectedWeight = record["collectedWeightKg"] as? Number
                             ?: record["collected_weight_kg"] as? Number
                         
-                        // Formata hora
+                        // Formata hora - backend envia em UTC, converte para timezone local
                         val timeStr = try {
                             if (timestamp.isNotEmpty()) {
-                                val inputFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
-                                val date = inputFormat.parse(timestamp)
+                                // Backend envia em UTC (formato ISO 8601), converte para timezone local
+                                val date = br.edu.utfpr.coletapb.utils.DateUtils.parseUtcToLocal(timestamp)
                                 if (date != null) {
-                                    val outputFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-                                    outputFormat.format(date)
+                                    br.edu.utfpr.coletapb.utils.DateUtils.formatTimeOnly(date)
                                 } else {
                                     ""
                                 }
@@ -142,6 +139,7 @@ class RouteRecordsActivity : AppCompatActivity() {
                                 ""
                             }
                         } catch (e: Exception) {
+                            Log.e("RouteRecords", "Erro ao formatar timestamp: ${e.message}", e)
                             ""
                         }
                         
