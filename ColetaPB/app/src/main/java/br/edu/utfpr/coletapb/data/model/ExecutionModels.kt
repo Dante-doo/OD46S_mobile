@@ -1,5 +1,6 @@
 package br.edu.utfpr.coletapb.data.model
 
+// Mantém apenas o que é exclusivo de Execução e GPS
 data class StartExecutionRequest(
     val assignment_id: Long,
     val initial_km: Int,
@@ -10,7 +11,7 @@ data class StartExecutionRequest(
 
 data class StartExecutionResponse(
     val success: Boolean,
-    val data: ExecutionData // <--- TEM QUE TER O "val" AQUI
+    val data: ExecutionData
 )
 
 data class ExecutionData(
@@ -25,7 +26,7 @@ data class Execution(
 data class GpsRecordRequest(
     val latitude: Double,
     val longitude: Double,
-    val gps_timestamp: String, // Formato ISO-8601
+    val gps_timestamp: String,
     val event_type: String = "NORMAL",
     val is_automatic: Boolean = true,
     val is_offline: Boolean = true
@@ -33,7 +34,7 @@ data class GpsRecordRequest(
 
 data class BatchResponse(
     val success: Boolean,
-    val data: Any // Pode refinar se precisar ler o retorno detalhado
+    val data: Any
 )
 
 data class CompleteExecutionRequest(

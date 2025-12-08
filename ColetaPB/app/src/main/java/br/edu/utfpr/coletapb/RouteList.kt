@@ -4,15 +4,17 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.widget.ListView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import br.edu.utfpr.coletapb.adapter.ItemRoute
 import br.edu.utfpr.coletapb.data.AppDatabase
-import br.edu.utfpr.coletapb.data.RouteDao
-import br.edu.utfpr.coletapb.data.RouteEntity
+import br.edu.utfpr.coletapb.data.dao.RouteDao
+import br.edu.utfpr.coletapb.data.model.RouteEntity
+import br.edu.utfpr.coletapb.data.remote.RetrofitClient
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class RouteList : AppCompatActivity() {
 
@@ -27,33 +29,8 @@ class RouteList : AppCompatActivity() {
 
         routeDao = AppDatabase.getDatabase(this).routeDao()
         listView = findViewById(R.id.lvRoutes)
-    }
 
-    override fun onStart() {
-        super.onStart()
-
-        lifecycleScope.launch {
-            // 1) sincroniza (clear + insert) em IO
-            try {
-                withContext(Dispatchers.IO) { syncRoutesInternal() }
-                Log.d("RouteList", "Sincronização concluída.")
-            } catch (e: Exception) {
-                Log.e("RouteList", "Falha ao sincronizar rotas", e)
-            }
-
-            // 2) lê do banco depois que terminou a sync
-            val routes = withContext(Dispatchers.IO) { routeDao.getAllRoutes() }
-            Log.d("RouteList", "Carregadas ${routes.size} rotas do banco.")
-
-            // primeira carga (ex.: no onStart, depois de ler do Room)
-            if (adapter == null) {
-                adapter = ItemRoute(this@RouteList, routes.toMutableList())
-                listView.adapter = adapter
-            } else {
-                adapter?.setData(routes)
-            }
-        }
-        // dentro da sua RouteList, depois de carregar as rotas e setar o adapter
+        // Listener de clique
         listView.setOnItemClickListener { _, _, position, _ ->
             val route = adapter?.getItem(position) ?: return@setOnItemClickListener
 
@@ -64,23 +41,68 @@ class RouteList : AppCompatActivity() {
             }
             startActivity(it)
         }
-
     }
 
-    private suspend fun syncRoutesInternal() {
-        val routesFromApi = listOf(
-            RouteEntity(101, "Rota 101", "Centro • Turno manhã", "COMMERCIAL", "0 8 * * 1,3,5", "HIGH", 120, 15.5),
-            RouteEntity(202, "Rota 202", "Bairro Norte • Turno tarde", "RESIDENTIAL", "0 14 * * 2,4,6", "MEDIUM", 90, 12.0),
-            RouteEntity(303, "Rota 303", "Bairro Sul • Turno noite", "RESIDENTIAL", "0 20 * * 1,3,5", "MEDIUM", 100, 14.2),
-            RouteEntity(404, "Rota 404", "Zona Leste • Turno manhã", "HOSPITAL", "0 9 * * *", "URGENT", 60, 8.0),
-            RouteEntity(505, "Rota 505", "Zona Oeste • Turno tarde", "SELECTIVE", "0 15 * * 5", "LOW", 110, 22.0)
-        )
-        routeDao.clearAllRoutes()
-        routeDao.insertAllRoutes(routesFromApi)
+    override fun onStart() {
+        super.onStart()
+        refreshRoutes()
+    }
+
+    private fun refreshRoutes() {
+        lifecycleScope.launch {
+            // 1. Tenta sincronizar com a API (Network -> DB Local)
+            try {
+                withContext(Dispatchers.IO) { syncRoutesFromApi() }
+            } catch (e: Exception) {
+                Log.e("RouteList", "Erro na sincronização", e)
+                Toast.makeText(this@RouteList, "Modo Offline: Usando dados locais", Toast.LENGTH_SHORT).show()
+            }
+
+            // 2. Lê do Banco Local para exibir (Single Source of Truth)
+            val routes = withContext(Dispatchers.IO) { routeDao.getAllRoutes() }
+
+            if (adapter == null) {
+                adapter = ItemRoute(this@RouteList, routes.toMutableList())
+                listView.adapter = adapter
+            } else {
+                adapter?.setData(routes)
+            }
+        }
+    }
+
+    private suspend fun syncRoutesFromApi() {
+        // Busca rotas da API
+        val response = RetrofitClient.getApiService(applicationContext).getRoutes()
+
+        if (response.isSuccessful) {
+            val apiRoutes = response.body()?.data?.routes
+
+            if (apiRoutes != null) {
+                // Converte DTO da API para Entidade do Room
+                val entities = apiRoutes.map { dto ->
+                    RouteEntity(
+                        id = dto.id,
+                        name = dto.name,
+                        description = dto.description,
+                        collection_type = dto.collection_type,
+                        periodicity = dto.periodicity,
+                        priority = dto.priority,
+                        estimated_time_minutes = dto.estimated_time_minutes ?: 0,
+                        distance_km = dto.distance_km ?: 0.0
+                    )
+                }
+
+                // Atualiza o cache local (estratégia simples: apaga e insere tudo)
+                routeDao.clearAllRoutes()
+                routeDao.insertAllRoutes(entities)
+            }
+        } else {
+            throw Exception("API Error: ${response.code()}")
+        }
     }
 
     override fun onSupportNavigateUp(): Boolean {
-        onBackPressedDispatcher.onBackPressed()
+        finish()
         return true
     }
 }

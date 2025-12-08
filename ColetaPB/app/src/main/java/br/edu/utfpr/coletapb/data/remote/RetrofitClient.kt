@@ -1,26 +1,42 @@
 package br.edu.utfpr.coletapb.data.remote
 
+import android.content.Context
+import br.edu.utfpr.coletapb.data.local.SessionManager
+import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.util.concurrent.TimeUnit
 
-// Usamos 'object' para criar um Singleton. Isso garante que teremos apenas
-// uma instância do Retrofit em todo o app.
 object RetrofitClient {
 
-    // SUBSTITUA PELA URL BASE DA SUA API
-    private const val BASE_URL = "http://192.168.1.5:8080/api/" // Exemplo: IP local
+    private const val BASE_URL = "http://192.168.1.5:8080/api/v1/"
 
-    // Cria a instância do Retrofit usando um builder
-    private val retrofit: Retrofit by lazy {
-        Retrofit.Builder()
-            .baseUrl(BASE_URL) // 1. Define a URL base para todas as chamadas
-            .addConverterFactory(GsonConverterFactory.create()) // 2. Adiciona o conversor Gson
-            .build() // 3. Constrói o objeto Retrofit
-    }
+    private var retrofit: Retrofit? = null
 
-    // Cria a implementação da nossa interface ApiService de forma "preguiçosa" (lazy)
-    // O código dentro do 'by lazy' só será executado na primeira vez que 'apiService' for chamado.
-    val apiService: ApiService by lazy {
-        retrofit.create(ApiService::class.java)
+    fun getApiService(context: Context): ApiService {
+        if (retrofit == null) {
+            val client = OkHttpClient.Builder()
+                .connectTimeout(30, TimeUnit.SECONDS) // Aumenta timeout para evitar erros em redes lentas
+                .readTimeout(30, TimeUnit.SECONDS)
+                .addInterceptor { chain ->
+                    val original = chain.request()
+                    val token = SessionManager.getToken(context)
+
+                    val requestBuilder = original.newBuilder()
+                    if (token != null) {
+                        requestBuilder.header("Authorization", "Bearer $token")
+                    }
+
+                    chain.proceed(requestBuilder.build())
+                }
+                .build()
+
+            retrofit = Retrofit.Builder()
+                .baseUrl(BASE_URL)
+                .client(client)
+                .addConverterFactory(GsonConverterFactory.create())
+                .build()
+        }
+        return retrofit!!.create(ApiService::class.java)
     }
 }

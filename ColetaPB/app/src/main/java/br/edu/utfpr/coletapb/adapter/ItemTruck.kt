@@ -1,56 +1,37 @@
-package com.example.coletapb.adapter
+package br.edu.utfpr.coletapb.adapter
 
 import android.content.Context
-import android.database.Cursor
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.BaseAdapter
 import android.widget.TextView
 import br.edu.utfpr.coletapb.R
+import br.edu.utfpr.coletapb.data.model.VehicleDto
 
+class ItemTruck(private val context: Context, private var trucks: List<VehicleDto>) : BaseAdapter() {
 
-class ItemTruck(private val contexto: Context, private val lista: Cursor) : BaseAdapter() {
+    override fun getCount(): Int = trucks.size
 
-    override fun getCount(): Int {
-        return lista.count
-    }
+    override fun getItem(position: Int): VehicleDto = trucks[position]
 
-    override fun getItem(position: Int): Any? {
-        lista.moveToPosition(position)
+    override fun getItemId(position: Int): Long = trucks[position].id
 
-        // Retorna um objeto simples com id, nome e placa
-        return Triple(
-            lista.getInt(0),      // id
-            lista.getString(1),   // nome
-            lista.getString(2)    // placa
-        )
-    }
-
-    override fun getItemId(position: Int): Long {
-        lista.moveToPosition(position)
-        return lista.getInt(0).toLong()
+    fun updateData(newTrucks: List<VehicleDto>) {
+        this.trucks = newTrucks
+        notifyDataSetChanged()
     }
 
     override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
-        val inflater = contexto.getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
-        val view = convertView ?: inflater.inflate(R.layout.item_truck, parent, false)
+        val view = convertView ?: LayoutInflater.from(context).inflate(R.layout.item_truck, parent, false)
 
-        // Recuperar os componentes visuais do item_truck.xml
-        val tvTruckName = view.findViewById<TextView>(R.id.tvTruckName)
-        val tvTruckPlate = view.findViewById<TextView>(R.id.tvTruckPlate)
+        val truck = getItem(position)
 
-        // Mover o cursor para a posição correta
-        lista.moveToPosition(position)
+        val tvName = view.findViewById<TextView>(R.id.tvTruckName)
+        val tvPlate = view.findViewById<TextView>(R.id.tvTruckPlate)
 
-        // Preencher os componentes
-        val id = lista.getInt(0)
-        val nome = lista.getString(1)
-        val placa = lista.getString(2)
-
-        tvTruckName.text = nome
-        tvTruckPlate.text = placa
-
+        tvName.text = "${truck.brand} ${truck.model}"
+        tvPlate.text = truck.license_plate
 
         return view
     }
