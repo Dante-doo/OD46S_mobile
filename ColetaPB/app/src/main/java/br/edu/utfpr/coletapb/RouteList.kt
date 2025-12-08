@@ -6,6 +6,7 @@ import android.util.Log
 import android.widget.ListView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat.startActivity
 import androidx.lifecycle.lifecycleScope
 import br.edu.utfpr.coletapb.adapter.ItemRoute
 import br.edu.utfpr.coletapb.data.AppDatabase
@@ -22,10 +23,43 @@ class RouteList : AppCompatActivity() {
     private lateinit var listView: ListView
     private var adapter: ItemRoute? = null
 
+    // IDs recebidos da tela anterior
+    private var truckId: Long = 0L
+    private var driverId: Long = 0L // ID do motorista logado
+
+    // --- INICIALIZAÇÃO DO VIEWMODEL ---
+    private val viewModel: RouteViewModel by viewModel {
+        RouteViewModelFactory(
+            RouteRepository(RetrofitClient.apiService)
+        )
+    }
+    // ------------------------------------
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_route_list)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
+
+        // 1. Obter os IDs passados pela Intent
+        truckId = intent.getLongExtra("truck_id", 0L)
+
+        // --- ATENÇÃO ---
+        // Precisa add a Intent na TruckList.kt.
+        // Exemplo:
+        // driverId = intent.getLongExtra("driver_id", 0L)
+
+        if (driverId == 0L) {
+            Log.w("RouteList", "Driver ID não recebido, usando '1' como teste.")
+            driverId = 1L // << SUBSTITUIR QUANDO TIVER O ID REAL
+        }
+        // -----------------------------------------------------------------
+
+        // Validar se recebemos os IDs necessários
+        if (truckId == 0L || driverId == 0L) {
+            Toast.makeText(this, "ID do Caminhão ou Motorista inválido.", Toast.LENGTH_LONG).show()
+            finish() // Fecha a tela se não tiver os dados
+            return
+        }
 
         routeDao = AppDatabase.getDatabase(this).routeDao()
         listView = findViewById(R.id.lvRoutes)
