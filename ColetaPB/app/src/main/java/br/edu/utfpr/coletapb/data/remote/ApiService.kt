@@ -1,27 +1,34 @@
 package br.edu.utfpr.coletapb.data.remote
 
-import br.edu.utfpr.coletapb.data.RouteEntity // << IMPORTAR
-import br.edu.utfpr.coletapb.data.model.LoginRequest
-import br.edu.utfpr.coletapb.data.model.LoginResponse
+import br.edu.utfpr.coletapb.data.model.*
 import retrofit2.Response
-import retrofit2.http.Body
-import retrofit2.http.GET    // << IMPORTAR
-import retrofit2.http.POST
-import retrofit2.http.Query // << IMPORTAR
+import retrofit2.http.*
 
 interface ApiService {
 
-    @POST("login")
+    // Login
+    @POST("auth/login")
     suspend fun login(@Body request: LoginRequest): Response<LoginResponse>
 
-    // --- NOVO ENDPOINT PARA BUSCAR ROTAS ---
-    /**
-     * Busca a lista de rotas filtrada.
-     * A URL final será algo como: /api/routes?driverId=123&truckId=456
-     */
+    // Veículos
+    @GET("vehicles")
+    suspend fun getVehicles(): Response<VehicleListResponse>
+
+    // Rotas
     @GET("routes")
-    suspend fun getRoutes(
-        @Query("driverId") driverId: Long,
-        @Query("truckId") truckId: Long
-    ): Response<List<RouteEntity>>
+    suspend fun getRoutes(): Response<RouteListResponse>
+
+    // Escala do Motorista
+    @GET("assignments/my-current")
+    suspend fun getMyAssignment(): Response<AssignmentResponse>
+
+    // Execuções
+    @POST("executions/start")
+    suspend fun startExecution(@Body request: StartExecutionRequest): Response<StartExecutionResponse>
+
+    @POST("executions/{id}/gps/batch")
+    suspend fun sendGpsBatch(@Path("id") id: Long, @Body gpsRecords: List<GpsRecordRequest>): Response<BatchResponse>
+
+    @PATCH("executions/{id}/complete")
+    suspend fun completeExecution(@Path("id") id: Long, @Body request: CompleteExecutionRequest): Response<Void>
 }
