@@ -3,18 +3,19 @@ package br.edu.utfpr.coletapb.data.model
 import com.google.gson.annotations.SerializedName
 
 data class StartExecutionRequest(
-    @SerializedName("assignmentId") val assignment_id: Long,
-    @SerializedName("initialKm") val initial_km: Int,
+    @SerializedName("assignment_id") val assignment_id: Long, // CORRIGIDO: snake_case
+    @SerializedName("initial_km") val initial_km: Int,      // CORRIGIDO: snake_case
     val latitude: Double,
     val longitude: Double,
-    @SerializedName("initialNotes") val initial_notes: String? = null
+    @SerializedName("initial_notes") val initial_notes: String? = null // CORRIGIDO: snake_case
 )
 
 data class CompleteExecutionRequest(
-    @SerializedName("finalKm") val final_km: Int,
+    @SerializedName("final_km") val final_km: Int,          // CORRIGIDO: snake_case
     val latitude: Double,
     val longitude: Double,
-    @SerializedName("finalNotes") val final_notes: String? = null
+    @SerializedName("final_notes") val final_notes: String? = null, // CORRIGIDO: snake_case
+    @SerializedName("assignment_id") val assignment_id: Long        // CORRIGIDO: snake_case
 )
 
 data class StartExecutionResponse(
@@ -36,16 +37,15 @@ data class BatchResponse(
     val data: Any?
 )
 
-// ATUALIZADO COM OS CAMPOS DO BRUNO
 data class GpsRecordRequest(
     val latitude: Double,
     val longitude: Double,
-    @SerializedName("gpsTimestamp") val gps_timestamp: String,
-    @SerializedName("eventType") val event_type: String = "NORMAL",
-    @SerializedName("isAutomatic") val is_automatic: Boolean = true,
-    @SerializedName("isOffline") val is_offline: Boolean = true,
+    @SerializedName("gps_timestamp") val gps_timestamp: String, // CORRIGIDO: snake_case
+    @SerializedName("event_type") val event_type: String = "NORMAL",
+    @SerializedName("is_automatic") val is_automatic: Boolean = true,
+    @SerializedName("is_offline") val is_offline: Boolean = true,
 
-    // --- NOVOS CAMPOS OPCIONAIS (Snake Case para o Batch) ---
+    // Campos Opcionais
     val description: String? = null,
 
     @SerializedName("point_id")

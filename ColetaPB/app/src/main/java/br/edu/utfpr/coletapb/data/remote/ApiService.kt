@@ -14,6 +14,13 @@ interface ApiService {
     @GET("vehicles")
     suspend fun getVehicles(): Response<List<VehicleDto>>
 
+    // MÉTODO CORRIGIDO: Retorna RouteListResponse e usa vehicle_id
+    @GET("routes")
+    suspend fun getRoutes(
+        @Query("driver_id") driverId: Long? = null,
+        @Query("vehicle_id") vehicleId: Long? = null
+    ): Response<RouteListResponse>
+
     @GET("assignments/my-current")
     suspend fun getMyAssignment(): Response<AssignmentResponse>
 
@@ -33,18 +40,13 @@ interface ApiService {
     @POST("executions/{id}/gps")
     suspend fun sendGpsWithPhoto(
         @Path("id") executionId: Long,
-        // Campos Obrigatórios
         @Part("latitude") latitude: RequestBody,
         @Part("longitude") longitude: RequestBody,
         @Part("gpsTimestamp") timestamp: RequestBody,
         @Part("eventType") eventType: RequestBody,
         @Part("isAutomatic") isAutomatic: RequestBody,
         @Part("isOffline") isOffline: RequestBody,
-
-        // Foto (Obrigatória neste método, opcional na lógica de negócio)
         @Part photo: MultipartBody.Part,
-
-        // Campos Opcionais (Podem ser null - Snake Case nas chaves @Part)
         @Part("description") description: RequestBody? = null,
         @Part("point_id") pointId: RequestBody? = null,
         @Part("collected_weight_kg") weight: RequestBody? = null,

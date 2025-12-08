@@ -46,7 +46,6 @@ import java.util.Locale
 
 class StartRoute : AppCompatActivity() {
 
-    // UI
     private lateinit var btStart: Button
     private lateinit var btFinish: Button
     private lateinit var btActions: Button
@@ -54,14 +53,12 @@ class StartRoute : AppCompatActivity() {
     private lateinit var tvHeader: TextView
     private lateinit var tvSub: TextView
 
-    // Estado
     private var routeStarted = false
     private var execLocalId: Long = 0L
     private var currentAssignmentId: Long? = null
     private var routeId: Long = 0L
     private var routeName: String? = null
 
-    // Banco de Dados e GPS
     private lateinit var db: AppDatabase
     private lateinit var executionDao: ExecutionDao
     private lateinit var gpsDao: GpsDao
@@ -69,34 +66,28 @@ class StartRoute : AppCompatActivity() {
     private lateinit var locationCallback: LocationCallback
     private var lastLocation: Location? = null
 
-    // Foto e Estado Temporário
     private var currentPhotoPath: String? = null
     private var pendingRecord: GpsRecordLocal? = null
 
-    // Campos temporários para restaurar o estado se a Activity for recriada
     private var pendingEventType: String? = null
     private var pendingDesc: String? = null
     private var pendingPointId: Long? = null
     private var pendingWeight: Double? = null
     private var pendingCondition: String? = null
 
-    // --- LAUNCHERS ---
-
     private val takePictureLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         if (success && currentPhotoPath != null) {
-            // Se o pendingRecord se perdeu (Activity morreu), tenta reconstruir
             val recordToSave = pendingRecord ?: GpsRecordLocal(
                 executionLocalId = execLocalId,
                 timestamp = System.currentTimeMillis(),
                 lat = lastLocation?.latitude ?: 0.0,
                 lng = lastLocation?.longitude ?: 0.0,
-                eventType = pendingEventType ?: "PROBLEM", // Fallback seguro
+                eventType = pendingEventType ?: "PROBLEM",
                 description = pendingDesc,
                 pointId = pendingPointId,
                 collectedWeight = pendingWeight,
                 pointCondition = pendingCondition
             )
-
             saveRecordToDb(recordToSave.copy(photoPath = currentPhotoPath))
         } else {
             Toast.makeText(this, "Foto cancelada", Toast.LENGTH_SHORT).show()
@@ -124,7 +115,6 @@ class StartRoute : AppCompatActivity() {
         routeId = intent.getLongExtra("route_id", 0L)
         routeName = intent.getStringExtra("route_name")
 
-        // Bind Views
         tvHeader = findViewById(R.id.tvHeader)
         tvSub = findViewById(R.id.tvSub)
         tvStatus = tvSub
@@ -135,7 +125,6 @@ class StartRoute : AppCompatActivity() {
         tvHeader.text = routeName ?: "Rota"
         btActions.text = "REGISTRAR AÇÃO"
 
-        // Init Components
         db = AppDatabase.getDatabase(this)
         executionDao = db.executionDao()
         gpsDao = db.gpsDao()
@@ -143,7 +132,6 @@ class StartRoute : AppCompatActivity() {
         setupLocationCallback()
 
         if (savedInstanceState != null) {
-            // Restauração de Estado
             routeStarted = savedInstanceState.getBoolean("route_started")
             execLocalId = savedInstanceState.getLong("exec_local_id")
 
@@ -151,7 +139,6 @@ class StartRoute : AppCompatActivity() {
                 currentAssignmentId = savedInstanceState.getLong("assignment_id").takeIf { it != 0L }
             }
 
-            // Restaura dados pendentes da câmera
             currentPhotoPath = savedInstanceState.getString("photo_path")
             pendingEventType = savedInstanceState.getString("pending_type")
             pendingDesc = savedInstanceState.getString("pending_desc")
@@ -170,7 +157,6 @@ class StartRoute : AppCompatActivity() {
         applyUiState()
         fetchAssignment()
 
-        // Listeners
         btStart.setOnClickListener {
             if (currentAssignmentId == null) {
                 fetchAssignment()
@@ -199,9 +185,6 @@ class StartRoute : AppCompatActivity() {
         pendingCondition = null
     }
 
-    // --- MÉTODOS DE INÍCIO (Start Route) ---
-
-    // Este método precisa existir para ser chamado pelo diálogo de KM
     private fun startRouteWithLocation(initialKm: Int) {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             Toast.makeText(this, "Sem permissão de GPS", Toast.LENGTH_SHORT).show()
@@ -230,7 +213,6 @@ class StartRoute : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             var serverId: Long? = null
 
-            // 1. Tenta criar no servidor (Bloqueante para garantir integridade)
             try {
                 if (currentAssignmentId != null) {
                     val req = StartExecutionRequest(
@@ -245,14 +227,14 @@ class StartRoute : AppCompatActivity() {
                     if (res.isSuccessful && res.body() != null) {
                         serverId = res.body()?.data?.execution?.id
                     } else {
-                        Log.e("StartRoute", "Erro API: ${res.code()} - ${res.errorBody()?.string()}")
+                        val errorBody = res.errorBody()?.string() ?: "Sem corpo de erro"
+                        Log.e("StartRoute", "Erro API: " + res.code() + " - " + errorBody)
                     }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
 
-            // 2. Se tiver sucesso, cria local
             if (serverId != null) {
                 val now = System.currentTimeMillis()
                 execLocalId = executionDao.insert(
@@ -291,8 +273,6 @@ class StartRoute : AppCompatActivity() {
             }
         }
     }
-
-    // --- MENUS E AÇÕES ---
 
     private fun showActionMenu() {
         val options = arrayOf(
@@ -334,8 +314,6 @@ class StartRoute : AppCompatActivity() {
             .setView(view)
             .setPositiveButton("Salvar") { _, _ ->
                 val idText = etPointId.text.toString()
-
-                // Validação Obrigatória para Pontos
                 if (idText.isEmpty()) {
                     Toast.makeText(this, "ID do Ponto é obrigatório!", Toast.LENGTH_SHORT).show()
                     return@setPositiveButton
@@ -361,26 +339,16 @@ class StartRoute : AppCompatActivity() {
             .setTitle("Registro")
             .setView(input)
             .setPositiveButton("Salvar") { _, _ ->
-                prepareRecord(
-                    eventType = eventType,
-                    description = input.text.toString()
-                )
+                prepareRecord(eventType = eventType, description = input.text.toString())
             }
             .setNegativeButton("Cancelar", null)
             .show()
     }
 
-    private fun prepareRecord(
-        eventType: String,
-        description: String?,
-        pointId: Long? = null,
-        weight: Double? = null,
-        condition: String? = null
-    ) {
+    private fun prepareRecord(eventType: String, description: String?, pointId: Long? = null, weight: Double? = null, condition: String? = null) {
         val lat = lastLocation?.latitude ?: 0.0
         val lng = lastLocation?.longitude ?: 0.0
 
-        // Salva nos campos temporários (backup)
         pendingEventType = eventType
         pendingDesc = description
         pendingPointId = pointId
@@ -416,16 +384,19 @@ class StartRoute : AppCompatActivity() {
     private fun launchCamera() {
         try {
             val photoFile = File.createTempFile("img_${System.currentTimeMillis()}", ".jpg", externalCacheDir)
-            currentPhotoPath = photoFile.absolutePath // Salva caminho String
+            currentPhotoPath = photoFile.absolutePath
 
+            // CORREÇÃO: Usar BuildConfig.APPLICATION_ID para garantir o authorities correto
             val uri = FileProvider.getUriForFile(
                 this,
-                "${applicationContext.packageName}.provider",
+                "${BuildConfig.APPLICATION_ID}.provider",
                 photoFile
             )
             takePictureLauncher.launch(uri)
         } catch (e: Exception) {
-            Toast.makeText(this, "Erro ao abrir câmera", Toast.LENGTH_SHORT).show()
+            // CORREÇÃO: Log para debug do erro real
+            Log.e("CAMERA_ERROR", "Erro ao abrir câmera: ${e.message}", e)
+            Toast.makeText(this, "Erro ao abrir câmera. Veja o Logcat.", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -438,8 +409,6 @@ class StartRoute : AppCompatActivity() {
         }
     }
 
-    // --- SINCRONIZAÇÃO FINAL ---
-
     private fun finishRoute(finalKm: Int) {
         stopLocationUpdates()
         val lat = lastLocation?.latitude ?: 0.0
@@ -448,21 +417,18 @@ class StartRoute : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             val localExec = executionDao.getById(execLocalId)
 
-            // Tenta recuperar ID do servidor se não tiver
             var serverId = localExec?.serverExecutionId
             if (serverId == null && localExec != null) {
                 serverId = recoverServerId(localExec)
             }
 
-            if (serverId != null) {
+            if (serverId != null && localExec != null) {
                 try {
                     val allPoints = gpsDao.listByExecution(execLocalId)
-                    val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US) // Sem Z para compatibilidade
+                    val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
 
-                    // Separa com/sem foto
                     val (withPhoto, withoutPhoto) = allPoints.partition { !it.photoPath.isNullOrEmpty() }
 
-                    // 1. Envia Batch (Sem foto)
                     if (withoutPhoto.isNotEmpty()) {
                         val batch = withoutPhoto.map {
                             GpsRecordRequest(
@@ -472,7 +438,6 @@ class StartRoute : AppCompatActivity() {
                                 event_type = it.eventType,
                                 is_automatic = it.eventType == "NORMAL",
                                 is_offline = true,
-                                // Campos opcionais
                                 description = it.description,
                                 point_id = it.pointId,
                                 collected_weight_kg = it.collectedWeight,
@@ -482,15 +447,20 @@ class StartRoute : AppCompatActivity() {
                         RetrofitClient.getApiService(applicationContext).sendGpsBatch(serverId, batch)
                     }
 
-                    // 2. Envia Individual (Com foto)
                     withPhoto.forEach { record ->
                         uploadSingleRecordWithPhoto(serverId, record, isoFormat)
                     }
 
-                    // 3. Finaliza
+                    val assignId = localExec.assignmentId
                     RetrofitClient.getApiService(applicationContext).completeExecution(
                         serverId,
-                        CompleteExecutionRequest(finalKm, lat, lng)
+                        CompleteExecutionRequest(
+                            final_km = finalKm,
+                            latitude = lat,
+                            longitude = lng,
+                            final_notes = "App finished",
+                            assignment_id = assignId
+                        )
                     )
 
                     withContext(Dispatchers.Main) {
@@ -499,6 +469,7 @@ class StartRoute : AppCompatActivity() {
                 } catch (e: Exception) {
                     e.printStackTrace()
                     withContext(Dispatchers.Main) {
+                        Log.e("FinishRoute", "Erro: " + e.message)
                         Toast.makeText(applicationContext, "Salvo offline. Erro no envio.", Toast.LENGTH_LONG).show()
                     }
                 }
@@ -508,7 +479,6 @@ class StartRoute : AppCompatActivity() {
                 }
             }
 
-            // Atualiza local
             if (localExec != null) {
                 executionDao.update(
                     localExec.copy(endTimestamp = System.currentTimeMillis(), status = "COMPLETED", endLat = lat, endLng = lng)
@@ -540,7 +510,6 @@ class StartRoute : AppCompatActivity() {
         return null
     }
 
-    // Envio Multipart (Com Foto)
     private suspend fun uploadSingleRecordWithPhoto(executionId: Long, record: GpsRecordLocal, sdf: SimpleDateFormat) {
         try {
             val file = File(record.photoPath!!)
@@ -552,8 +521,6 @@ class StartRoute : AppCompatActivity() {
 
             val txt = "text/plain".toMediaTypeOrNull()
 
-            // Prepara partes opcionais (só envia se não for nulo)
-            // IMPORTANTE: Chaves em snake_case para bater com a API
             val descPart = record.description?.toRequestBody(txt)
             val pIdPart = record.pointId?.toString()?.toRequestBody(txt)
             val wPart = record.collectedWeight?.toString()?.toRequestBody(txt)
@@ -575,11 +542,6 @@ class StartRoute : AppCompatActivity() {
             )
         } catch (e: Exception) { e.printStackTrace() }
     }
-
-    // --- UTILS & PERMISSIONS ---
-    // (Mantenha os métodos auxiliares: fetchAssignment, checkPermissionsAndShowDialog, showKmDialog,
-    // startRouteWithLocation, createExecution, setupLocationCallback, startLocationUpdates,
-    // stopLocationUpdates, saveGpsPoint, applyUiState)
 
     private fun fetchAssignment() {
         lifecycleScope.launch(Dispatchers.IO) {
