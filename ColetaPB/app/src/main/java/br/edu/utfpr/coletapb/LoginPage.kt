@@ -47,7 +47,7 @@ class LoginPage : AppCompatActivity() {
                 var connection: HttpURLConnection? = null
                 try {
                     // Use o IP da sua máquina na rede local
-                    val url = URL("http://192.168.3.83:8080/api/v1/auth/login")
+                    val url = URL("http://192.168.1.5:8080/api/v1/auth/login")
                     connection = url.openConnection() as HttpURLConnection
                     connection.requestMethod = "POST"
                     connection.setRequestProperty("Content-Type", "application/json; utf-8")

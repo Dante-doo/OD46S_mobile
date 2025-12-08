@@ -8,7 +8,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 object RetrofitClient {
 
     // SUBSTITUA PELA URL BASE DA SUA API
-    private const val BASE_URL = "http://192.168.0.1:8080/api/" // Exemplo: IP local
+    private const val BASE_URL = "http://192.168.1.5:8080/api/" // Exemplo: IP local
 
     // Cria a instância do Retrofit usando um builder
     private val retrofit: Retrofit by lazy {

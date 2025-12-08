@@ -16,7 +16,7 @@ import br.edu.utfpr.coletapb.data.model.GpsRecordLocal
         ExecutionLocal::class,     // NOVO
         GpsRecordLocal::class      // NOVO
     ],
-    version = 2,                   // <— suba a versão
+    version = 3,                   // <— suba a versão
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

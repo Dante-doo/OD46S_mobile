@@ -5,10 +5,12 @@ import androidx.room.PrimaryKey
 
 @Entity(tableName = "executions_local")
 data class ExecutionLocal(
-    @PrimaryKey(autoGenerate = true) val localId: Long = 0L,   // id local (Room)
-    val backendId: Long? = null,                               // id no backend (quando existir)
+    @PrimaryKey(autoGenerate = true) val localId: Long = 0L,   // ID local (Room) usado internamente pelo app
 
-    val routeId: Long,                                         // RouteEntity.id
+    // Campo novo para armazenar o ID retornado pela API (StartRouteResponse)
+    val serverExecutionId: Long? = null,
+
+    val routeId: Long,                                         // Vínculo com a rota local
     val vehicleId: Long? = null,
     val driverId: Long? = null,
 

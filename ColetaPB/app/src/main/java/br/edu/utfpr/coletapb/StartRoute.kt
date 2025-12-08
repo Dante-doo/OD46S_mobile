@@ -1,16 +1,27 @@
 package br.edu.utfpr.coletapb
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.location.Location
 import android.os.Bundle
+import android.os.Looper
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import br.edu.utfpr.coletapb.data.AppDatabase
 import br.edu.utfpr.coletapb.data.dao.ExecutionDao
 import br.edu.utfpr.coletapb.data.dao.GpsDao
+import br.edu.utfpr.coletapb.data.model.CompleteExecutionRequest
 import br.edu.utfpr.coletapb.data.model.ExecutionLocal
 import br.edu.utfpr.coletapb.data.model.GpsRecordLocal
+import br.edu.utfpr.coletapb.data.model.GpsRecordRequest
+import br.edu.utfpr.coletapb.data.model.StartExecutionRequest
+import br.edu.utfpr.coletapb.data.remote.RetrofitClient
+import com.google.android.gms.location.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -20,196 +31,260 @@ import java.util.Locale
 
 class StartRoute : AppCompatActivity() {
 
-    private var routeStarted = false
-
+    // Controles de UI
     private lateinit var btStart: Button
     private lateinit var btFinish: Button
     private lateinit var btIncident: Button
+    private lateinit var tvStatus: TextView
 
-    // DB
+    // Estado
+    private var routeStarted = false
+    private var execLocalId: Long = 0L
+
+    // Dados da Intent
+    private var routeId: Long = 0L
+    private var routeName: String? = null
+
+    // Banco de Dados
     private lateinit var db: AppDatabase
     private lateinit var executionDao: ExecutionDao
     private lateinit var gpsDao: GpsDao
 
-    // Execução criada ao iniciar
-    private var execLocalId: Long = 0L
+    // --- GPS ---
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private lateinit var locationCallback: LocationCallback
+    private var lastLocation: Location? = null
 
-    // extras
-    private var routeId: Long = 0L
-    private var routeName: String? = null
-    private var routeInfo: String? = null
-
-    private val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
+    // Launcher para pedir permissão
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        ) {
+            // Permissão concedida, inicia a rota
+            startRouteWithLocation()
+        } else {
+            Toast.makeText(this, "Permissão de GPS necessária!", Toast.LENGTH_LONG).show()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_start_route)
+
+        // Configurações Iniciais
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = "Iniciar rota"
 
-        // extras vindos da RouteList
-        routeId   = intent.getLongExtra("route_id", 0L)
+        routeId = intent.getLongExtra("route_id", 0L)
         routeName = intent.getStringExtra("route_name")
-        routeInfo = intent.getStringExtra("route_info")
 
         findViewById<TextView>(R.id.tvHeader).text = routeName ?: "Rota"
-        findViewById<TextView>(R.id.tvSub).text    = routeInfo.orEmpty()
+        tvStatus = findViewById(R.id.tvSub) // Usando tvSub para mostrar status do GPS
 
-        btStart    = findViewById(R.id.btStart)
-        btFinish   = findViewById(R.id.btFinish)
+        btStart = findViewById(R.id.btStart)
+        btFinish = findViewById(R.id.btFinish)
         btIncident = findViewById(R.id.btIncident)
 
-        // DB
         db = AppDatabase.getDatabase(this)
         executionDao = db.executionDao()
         gpsDao = db.gpsDao()
 
-        // restaura estado
-        routeStarted = savedInstanceState?.getBoolean("route_started") ?: false
-        execLocalId  = savedInstanceState?.getLong("exec_local_id") ?: 0L
+        // Inicializa cliente de GPS
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        setupLocationCallback()
+
+        // Restaura estado
+        if (savedInstanceState != null) {
+            routeStarted = savedInstanceState.getBoolean("route_started")
+            execLocalId = savedInstanceState.getLong("exec_local_id")
+            if (routeStarted) startLocationUpdates() // Retoma GPS se estava rodando
+        }
         applyUiState()
 
-        btStart.setOnClickListener { onStartRoute() }
-        btFinish.setOnClickListener { onFinishRoute() }
-        btIncident.setOnClickListener { onIncident() }
+        // Listeners
+        btStart.setOnClickListener { checkPermissionsAndStart() }
+        btFinish.setOnClickListener { finishRoute() }
+        btIncident.setOnClickListener { registerIncident() }
     }
 
-    private fun onStartRoute() {
+    // 1. Verifica permissão antes de iniciar
+    private fun checkPermissionsAndStart() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            startRouteWithLocation()
+        } else {
+            requestPermissionLauncher.launch(
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            )
+        }
+    }
+
+    // 2. Inicia recebimento de atualizações de GPS
+    private fun startRouteWithLocation() {
+        startLocationUpdates() // Começa a ouvir o GPS
+
+        Toast.makeText(this, "Obtendo GPS...", Toast.LENGTH_SHORT).show()
+
+        // Pega a última localização conhecida para iniciar IMEDIATAMENTE (opcional)
+        // ou espera o primeiro callback. Aqui vamos tentar pegar a última para agilizar o Start.
+        try {
+            fusedLocationClient.lastLocation.addOnSuccessListener { location ->
+                val lat = location?.latitude ?: 0.0
+                val lng = location?.longitude ?: 0.0
+                createExecution(lat, lng)
+            }
+        } catch (e: SecurityException) {
+            createExecution(0.0, 0.0) // Fallback se der erro
+        }
+    }
+
+    // 3. Cria a execução no BD e API
+    private fun createExecution(lat: Double, lng: Double) {
         if (routeStarted) return
 
-        val now = System.currentTimeMillis()
-        val lat = 0.0
-        val lng = 0.0
-
         lifecycleScope.launch(Dispatchers.IO) {
-            // cria execução com início (0,0)
+            // Tenta API
+            var serverId: Long? = null
+            try {
+                // TODO: Pegar ID real do Assignment e KM atual
+                val req = StartExecutionRequest(1, 10000, lat, lng)
+                val res = RetrofitClient.apiService.startExecution(req)
+                if (res.isSuccessful) {
+                    serverId = res.body()?.data?.execution?.id
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
+            // Grava Local
+            val now = System.currentTimeMillis()
             execLocalId = executionDao.insert(
                 ExecutionLocal(
                     routeId = routeId,
-                    startTimestamp = now,
+                    serverExecutionId = serverId,
+                    status = "IN_PROGRESS",
                     startLat = lat,
                     startLng = lng,
-                    status = "IN_PROGRESS"
+                    startTimestamp = now
                 )
             )
-            // registra ponto START (opcional)
-            gpsDao.insert(
-                GpsRecordLocal(
-                    executionLocalId = execLocalId,
-                    timestamp = now,
-                    lat = lat,
-                    lng = lng,
-                    eventType = "START"
-                )
-            )
+
+            // Registra ponto START
+            gpsDao.insert(GpsRecordLocal(executionLocalId = execLocalId, timestamp = now, lat = lat, lng = lng, eventType = "START"))
 
             withContext(Dispatchers.Main) {
                 routeStarted = true
                 applyUiState()
-                Toast.makeText(this@StartRoute, "Rota iniciada!", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@StartRoute, "Rota Iniciada! (Server: ${serverId ?: "OFF"})", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    private fun onIncident() {
-        if (!routeStarted || execLocalId == 0L) {
-            Toast.makeText(this, "Inicie a rota primeiro.", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val now = System.currentTimeMillis()
-        val lat = 0.0
-        val lng = 0.0
+    // 4. Configura o loop de GPS
+    private fun setupLocationCallback() {
+        locationCallback = object : LocationCallback() {
+            override fun onLocationResult(locationResult: LocationResult) {
+                locationResult.lastLocation?.let { location ->
+                    lastLocation = location
+                    tvStatus.text = "GPS: ${location.latitude}, ${location.longitude}"
 
-        lifecycleScope.launch(Dispatchers.IO) {
-            gpsDao.insert(
-                GpsRecordLocal(
-                    executionLocalId = execLocalId,
-                    timestamp = now,
-                    lat = lat,
-                    lng = lng,
-                    eventType = "INCIDENT" // imprevisto
-                )
-            )
+                    // Se a rota está ativa, salva o ponto automaticamente
+                    if (routeStarted && execLocalId != 0L) {
+                        saveGpsPoint(location)
+                    }
+                }
+            }
         }
-        Toast.makeText(this, "Imprevisto registrado (0,0).", Toast.LENGTH_SHORT).show()
     }
 
-    private fun onFinishRoute() {
-        if (!routeStarted || execLocalId == 0L) return
+    private fun startLocationUpdates() {
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10000) // 10 segundos
+            .setMinUpdateIntervalMillis(5000) // Mínimo 5s
+            .build()
 
-        val now = System.currentTimeMillis()
-        val lat = 0.0
-        val lng = 0.0
+        try {
+            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
+        } catch (e: SecurityException) {
+            e.printStackTrace()
+        }
+    }
 
+    private fun stopLocationUpdates() {
+        fusedLocationClient.removeLocationUpdates(locationCallback)
+    }
+
+    private fun saveGpsPoint(loc: Location) {
         lifecycleScope.launch(Dispatchers.IO) {
-            // atualiza execução com fim (0,0)
-            executionDao.getById(execLocalId)?.let { exec ->
-                executionDao.update(
-                    exec.copy(
-                        endTimestamp = now,
-                        endLat = lat,
-                        endLng = lng,
-                        status = "COMPLETED"
-                    )
-                )
-            }
-            // registra ponto END (opcional)
             gpsDao.insert(
                 GpsRecordLocal(
                     executionLocalId = execLocalId,
-                    timestamp = now,
-                    lat = lat,
-                    lng = lng,
-                    eventType = "END"
+                    timestamp = loc.time,
+                    lat = loc.latitude,
+                    lng = loc.longitude,
+                    eventType = "NORMAL"
                 )
             )
+        }
+    }
 
-            // monta resumo
-            val (startStr, endStr, incidents) = buildSummary(execLocalId)
+    // 5. Finaliza Rota e Sincroniza
+    private fun finishRoute() {
+        stopLocationUpdates() // Para o GPS
+
+        val lat = lastLocation?.latitude ?: 0.0
+        val lng = lastLocation?.longitude ?: 0.0
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            // ... (Lógica de sincronização igual à anterior) ...
+            // Sincroniza com API...
+            val localExec = executionDao.getById(execLocalId)
+            val serverId = localExec?.serverExecutionId
+
+            if (serverId != null) {
+                val points = gpsDao.listByExecution(execLocalId)
+                val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+
+                val batch = points.map {
+                    GpsRecordRequest(it.lat, it.lng, isoFormat.format(Date(it.timestamp)), it.eventType)
+                }
+
+                try {
+                    RetrofitClient.apiService.sendGpsBatch(serverId, batch)
+                    RetrofitClient.apiService.completeExecution(serverId, CompleteExecutionRequest(10050, lat, lng))
+                    withContext(Dispatchers.Main) { Toast.makeText(applicationContext, "Sincronizado!", Toast.LENGTH_SHORT).show() }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) { Toast.makeText(applicationContext, "Erro Sync: ${e.message}", Toast.LENGTH_SHORT).show() }
+                }
+            }
+
+            // Atualiza Local
+            executionDao.update(localExec!!.copy(endTimestamp = System.currentTimeMillis(), status = "COMPLETED", endLat = lat, endLng = lng))
 
             withContext(Dispatchers.Main) {
-                routeStarted = false
-                applyUiState()
-
-                val msg = """
-                    Início: $startStr
-                    Fim:    $endStr
-                    Lat/Lng início: 0,0
-                    Lat/Lng fim:    0,0
-                    Imprevistos: ${incidents.count}${if (incidents.count == 0) "" else "\n${incidents.times}"}
-                """.trimIndent()
-
-                Toast.makeText(this@StartRoute, msg, Toast.LENGTH_LONG).show()
-                finish() // volta para a lista
+                finish()
             }
         }
     }
 
-    // Resumo para o Toast final (sem "paradas")
-    private suspend fun buildSummary(id: Long): Triple<String, String, IncidentInfo> {
-        val exec = executionDao.getById(id)
-        val startStr = exec?.startTimestamp?.let { sdf.format(Date(it)) } ?: "-"
-        val endStr   = exec?.endTimestamp?.let { sdf.format(Date(it)) } ?: "-"
-
-        val incidents = gpsDao.listByExecution(id).filter { it.eventType == "INCIDENT" }
-        val times = incidents.joinToString("\n") { " - ${sdf.format(Date(it.timestamp))}" }
-
-        return Triple(startStr, endStr, IncidentInfo(incidents.size, times))
+    private fun registerIncident() {
+        val lat = lastLocation?.latitude ?: 0.0
+        val lng = lastLocation?.longitude ?: 0.0
+        lifecycleScope.launch(Dispatchers.IO) {
+            gpsDao.insert(GpsRecordLocal(executionLocalId = execLocalId, timestamp = System.currentTimeMillis(), lat = lat, lng = lng, eventType = "INCIDENT"))
+        }
+        Toast.makeText(this, "Imprevisto registrado!", Toast.LENGTH_SHORT).show()
     }
-
-    data class IncidentInfo(val count: Int, val times: String)
 
     private fun applyUiState() {
         if (routeStarted) {
             btStart.visibility = android.view.View.GONE
             btFinish.visibility = android.view.View.VISIBLE
             btIncident.isEnabled = true
-            supportActionBar?.title = "Rota em andamento"
         } else {
             btStart.visibility = android.view.View.VISIBLE
             btFinish.visibility = android.view.View.GONE
             btIncident.isEnabled = false
-            supportActionBar?.title = "Iniciar rota"
         }
     }
 
@@ -217,10 +292,5 @@ class StartRoute : AppCompatActivity() {
         outState.putBoolean("route_started", routeStarted)
         outState.putLong("exec_local_id", execLocalId)
         super.onSaveInstanceState(outState)
-    }
-
-    override fun onSupportNavigateUp(): Boolean {
-        onBackPressedDispatcher.onBackPressed()
-        return true
     }
 }
