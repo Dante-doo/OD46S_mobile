@@ -7,8 +7,12 @@ import retrofit2.Response
 
 class LoginRepository(private val apiService: ApiService) {
 
-    suspend fun doLogin(cpf: String, password: String): Response<LoginResponse> {
-        val loginRequest = LoginRequest(cpf = cpf, password = password)
+    suspend fun doLogin(email: String?, cpf: String?, password: String): Response<LoginResponse> {
+        val loginRequest = LoginRequest(
+            email = email,
+            cpf = cpf,
+            password = password
+        )
         return apiService.login(loginRequest)
     }
 }

@@ -30,7 +30,7 @@ class ItemTruck(private val context: Context, private var trucks: List<VehicleDt
         val tvName = view.findViewById<TextView>(R.id.tvTruckName)
         val tvPlate = view.findViewById<TextView>(R.id.tvTruckPlate)
 
-        tvName.text = "${truck.brand} ${truck.model}"
+        tvName.text = truck.model
         tvPlate.text = truck.license_plate
 
         return view

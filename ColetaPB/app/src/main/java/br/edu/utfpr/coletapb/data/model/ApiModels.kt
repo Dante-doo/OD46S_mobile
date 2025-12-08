@@ -1,56 +1,53 @@
 package br.edu.utfpr.coletapb.data.model
 
-// --- Veículos (Vehicles) ---
-data class VehicleListResponse(
-    val success: Boolean,
-    val data: VehicleData
-)
+import com.google.gson.annotations.SerializedName
 
-data class VehicleData(
-    val vehicles: List<VehicleDto>
-)
-
+// --- Veículos ---
 data class VehicleDto(
     val id: Long,
-    val license_plate: String,
+    @SerializedName("licensePlate") val license_plate: String, // JSON: licensePlate -> Kotlin: license_plate
     val model: String,
-    val brand: String,
-    val status: String
+    val brand: String? = null, // Pode vir nulo
+    val status: String? = null,
+    val year: Int? = null
 )
 
-// --- Rotas (Routes) ---
-data class RouteListResponse(
-    val success: Boolean,
-    val data: RouteData
-)
-
-data class RouteData(
-    val routes: List<RouteDto>
-)
-
+// --- Rotas ---
 data class RouteDto(
     val id: Long,
     val name: String,
     val description: String?,
-    val collection_type: String,
+
+    @SerializedName("collectionType")
+    val collection_type: String?, // JSON: collectionType -> Kotlin: collection_type
+
     val periodicity: String?,
-    val priority: String,
-    val estimated_time_minutes: Int?,
-    val distance_km: Double?
+
+    // Estes campos não vieram no JSON, então devem ser anuláveis
+    val priority: String?,
+    @SerializedName("estimatedTimeMinutes") val estimated_time_minutes: Int?,
+    @SerializedName("distanceKm") val distance_km: Double?
 )
 
-// --- Escala (Assignment) - Caso precise ---
+// --- Escala (Assignment) ---
 data class AssignmentResponse(
     val success: Boolean,
-    val data: AssignmentWrapper
+    val data: AssignmentData
 )
 
-data class AssignmentWrapper(
+data class AssignmentData(
     val assignment: AssignmentDto
 )
 
 data class AssignmentDto(
     val id: Long,
     val route: RouteDto,
-    val vehicle: VehicleDto
+    val vehicle: VehicleDto,
+    val status: String,
+
+    @SerializedName("startDate")
+    val start_date: String,
+
+    @SerializedName("endDate")
+    val end_date: String?
 )

@@ -3,17 +3,24 @@ package br.edu.utfpr.coletapb
 import android.Manifest
 import android.content.pm.PackageManager
 import android.location.Location
+import android.net.Uri
 import android.os.Bundle
 import android.os.Looper
 import android.text.InputType
+import android.util.Log
+import android.view.LayoutInflater
+import android.view.View
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import br.edu.utfpr.coletapb.data.AppDatabase
 import br.edu.utfpr.coletapb.data.dao.ExecutionDao
@@ -28,16 +35,21 @@ import com.google.android.gms.location.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 class StartRoute : AppCompatActivity() {
 
-    // Controles de UI
+    // UI
     private lateinit var btStart: Button
     private lateinit var btFinish: Button
-    private lateinit var btIncident: Button
+    private lateinit var btActions: Button
     private lateinit var tvStatus: TextView
     private lateinit var tvHeader: TextView
     private lateinit var tvSub: TextView
@@ -45,33 +57,60 @@ class StartRoute : AppCompatActivity() {
     // Estado
     private var routeStarted = false
     private var execLocalId: Long = 0L
-    private var currentAssignmentId: Long? = null // ID da escala vindo da API
-
-    // Dados da Intent (apenas visual, pois o ID real vem da API)
+    private var currentAssignmentId: Long? = null
     private var routeId: Long = 0L
     private var routeName: String? = null
 
-    // Banco de Dados
+    // Banco de Dados e GPS
     private lateinit var db: AppDatabase
     private lateinit var executionDao: ExecutionDao
     private lateinit var gpsDao: GpsDao
-
-    // --- GPS ---
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
     private var lastLocation: Location? = null
 
-    // Launcher para pedir permissão
+    // Foto e Estado Temporário
+    private var currentPhotoPath: String? = null
+    private var pendingRecord: GpsRecordLocal? = null
+
+    // Campos temporários para restaurar o estado se a Activity for recriada
+    private var pendingEventType: String? = null
+    private var pendingDesc: String? = null
+    private var pendingPointId: Long? = null
+    private var pendingWeight: Double? = null
+    private var pendingCondition: String? = null
+
+    // --- LAUNCHERS ---
+
+    private val takePictureLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        if (success && currentPhotoPath != null) {
+            // Se o pendingRecord se perdeu (Activity morreu), tenta reconstruir
+            val recordToSave = pendingRecord ?: GpsRecordLocal(
+                executionLocalId = execLocalId,
+                timestamp = System.currentTimeMillis(),
+                lat = lastLocation?.latitude ?: 0.0,
+                lng = lastLocation?.longitude ?: 0.0,
+                eventType = pendingEventType ?: "PROBLEM", // Fallback seguro
+                description = pendingDesc,
+                pointId = pendingPointId,
+                collectedWeight = pendingWeight,
+                pointCondition = pendingCondition
+            )
+
+            saveRecordToDb(recordToSave.copy(photoPath = currentPhotoPath))
+        } else {
+            Toast.makeText(this, "Foto cancelada", Toast.LENGTH_SHORT).show()
+        }
+        clearPendingData()
+    }
+
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-            permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        ) {
-            // Permissão concedida, mostra o dialog de KM
+        if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
             showKmDialog(isStart = true)
         } else {
-            Toast.makeText(this, "Permissão de GPS necessária para iniciar!", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Permissão de GPS necessária!", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -79,54 +118,63 @@ class StartRoute : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_start_route)
 
-        // Configurações Iniciais da UI
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        supportActionBar?.title = "Iniciar rota"
+        supportActionBar?.title = "Execução da Rota"
 
         routeId = intent.getLongExtra("route_id", 0L)
         routeName = intent.getStringExtra("route_name")
 
+        // Bind Views
         tvHeader = findViewById(R.id.tvHeader)
         tvSub = findViewById(R.id.tvSub)
-        tvStatus = tvSub // Alias para facilitar leitura
-
-        tvHeader.text = routeName ?: "Carregando rota..."
-        tvSub.text = "Aguardando início..."
-
+        tvStatus = tvSub
         btStart = findViewById(R.id.btStart)
         btFinish = findViewById(R.id.btFinish)
-        btIncident = findViewById(R.id.btIncident)
+        btActions = findViewById(R.id.btIncident)
 
-        // Inicializa Banco de Dados
+        tvHeader.text = routeName ?: "Rota"
+        btActions.text = "REGISTRAR AÇÃO"
+
+        // Init Components
         db = AppDatabase.getDatabase(this)
         executionDao = db.executionDao()
         gpsDao = db.gpsDao()
-
-        // Inicializa cliente de GPS
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         setupLocationCallback()
 
-        // Restaura estado se houver rotação de tela
         if (savedInstanceState != null) {
+            // Restauração de Estado
             routeStarted = savedInstanceState.getBoolean("route_started")
             execLocalId = savedInstanceState.getLong("exec_local_id")
-            currentAssignmentId = savedInstanceState.getLong("assignment_id").takeIf { it != 0L }
 
-            if (routeStarted) {
-                startLocationUpdates() // Retoma GPS se estava rodando
+            if (currentAssignmentId == null) {
+                currentAssignmentId = savedInstanceState.getLong("assignment_id").takeIf { it != 0L }
             }
+
+            // Restaura dados pendentes da câmera
+            currentPhotoPath = savedInstanceState.getString("photo_path")
+            pendingEventType = savedInstanceState.getString("pending_type")
+            pendingDesc = savedInstanceState.getString("pending_desc")
+
+            if (savedInstanceState.containsKey("pending_point_id"))
+                pendingPointId = savedInstanceState.getLong("pending_point_id")
+
+            if (savedInstanceState.containsKey("pending_weight"))
+                pendingWeight = savedInstanceState.getDouble("pending_weight")
+
+            pendingCondition = savedInstanceState.getString("pending_cond")
+
+            if (routeStarted) startLocationUpdates()
         }
 
         applyUiState()
-
-        // 1. Tenta buscar a escala automaticamente ao abrir
         fetchAssignment()
 
-        // Listeners dos Botões
+        // Listeners
         btStart.setOnClickListener {
             if (currentAssignmentId == null) {
-                Toast.makeText(this, "Buscando dados da escala...", Toast.LENGTH_SHORT).show()
-                fetchAssignment() // Tenta buscar de novo se falhou antes
+                fetchAssignment()
+                Toast.makeText(this, "Buscando escala...", Toast.LENGTH_SHORT).show()
             } else {
                 checkPermissionsAndShowDialog()
             }
@@ -136,91 +184,37 @@ class StartRoute : AppCompatActivity() {
             showKmDialog(isStart = false)
         }
 
-        btIncident.setOnClickListener {
-            registerIncident()
+        btActions.setOnClickListener {
+            showActionMenu()
         }
     }
 
-    // --- Lógica de Negócio ---
-
-    private fun fetchAssignment() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                // Importante: Usar getApiService(context) para injetar o Token
-                val response = RetrofitClient.getApiService(applicationContext).getMyAssignment()
-
-                if (response.isSuccessful) {
-                    val assignment = response.body()?.data?.assignment
-                    currentAssignmentId = assignment?.id
-
-                    withContext(Dispatchers.Main) {
-                        if (assignment != null) {
-                            tvHeader.text = assignment.route.name
-                            tvSub.text = "Veículo: ${assignment.vehicle.license_plate}"
-                            Toast.makeText(this@StartRoute, "Escala #${assignment.id} carregada", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                } else {
-                    withContext(Dispatchers.Main) {
-                        tvSub.text = "Erro ao carregar escala"
-                        // Não mostramos Toast de erro aqui para não incomodar na abertura,
-                        // o usuário verá erro se tentar clicar em Iniciar.
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                withContext(Dispatchers.Main) {
-                    tvSub.text = "Sem conexão para carregar escala"
-                }
-            }
-        }
+    private fun clearPendingData() {
+        pendingRecord = null
+        currentPhotoPath = null
+        pendingEventType = null
+        pendingDesc = null
+        pendingPointId = null
+        pendingWeight = null
+        pendingCondition = null
     }
 
-    private fun checkPermissionsAndShowDialog() {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-            showKmDialog(isStart = true)
-        } else {
-            requestPermissionLauncher.launch(
-                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-            )
-        }
-    }
+    // --- MÉTODOS DE INÍCIO (Start Route) ---
 
-    private fun showKmDialog(isStart: Boolean) {
-        val input = EditText(this)
-        input.inputType = InputType.TYPE_CLASS_NUMBER
-        input.hint = if (isStart) "KM Inicial (ex: 10500)" else "KM Final"
-
-        AlertDialog.Builder(this)
-            .setTitle(if (isStart) "Iniciar Rota" else "Finalizar Rota")
-            .setMessage("Informe a quilometragem do painel:")
-            .setView(input)
-            .setPositiveButton("Confirmar") { _, _ ->
-                val kmStr = input.text.toString()
-                if (kmStr.isNotEmpty()) {
-                    val km = kmStr.toInt()
-                    if (isStart) {
-                        startRouteWithLocation(km)
-                    } else {
-                        finishRoute(km)
-                    }
-                } else {
-                    Toast.makeText(this, "Quilometragem é obrigatória!", Toast.LENGTH_SHORT).show()
-                }
-            }
-            .setNegativeButton("Cancelar", null)
-            .show()
-    }
-
+    // Este método precisa existir para ser chamado pelo diálogo de KM
     private fun startRouteWithLocation(initialKm: Int) {
-        startLocationUpdates() // Liga o GPS
-        Toast.makeText(this, "Iniciando coleta...", Toast.LENGTH_SHORT).show()
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "Sem permissão de GPS", Toast.LENGTH_SHORT).show()
+            return
+        }
 
-        // Tenta pegar a última localização para já salvar o start com coordenadas
+        startLocationUpdates()
+        Toast.makeText(this, "Iniciando...", Toast.LENGTH_SHORT).show()
+
         try {
-            fusedLocationClient.lastLocation.addOnSuccessListener { location ->
-                val lat = location?.latitude ?: 0.0
-                val lng = location?.longitude ?: 0.0
+            fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
+                val lat = loc?.latitude ?: 0.0
+                val lng = loc?.longitude ?: 0.0
                 createExecution(lat, lng, initialKm)
             }.addOnFailureListener {
                 createExecution(0.0, 0.0, initialKm)
@@ -236,236 +230,452 @@ class StartRoute : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             var serverId: Long? = null
 
-            // 1. Tenta iniciar na API
+            // 1. Tenta criar no servidor (Bloqueante para garantir integridade)
             try {
                 if (currentAssignmentId != null) {
                     val req = StartExecutionRequest(
                         assignment_id = currentAssignmentId!!,
                         initial_km = initialKm,
                         latitude = lat,
-                        longitude = lng
+                        longitude = lng,
+                        initial_notes = "Iniciado pelo App"
                     )
                     val res = RetrofitClient.getApiService(applicationContext).startExecution(req)
-                    if (res.isSuccessful) {
+
+                    if (res.isSuccessful && res.body() != null) {
                         serverId = res.body()?.data?.execution?.id
+                    } else {
+                        Log.e("StartRoute", "Erro API: ${res.code()} - ${res.errorBody()?.string()}")
                     }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
 
-            // 2. Grava no Banco Local
-            val now = System.currentTimeMillis()
-            execLocalId = executionDao.insert(
-                ExecutionLocal(
-                    routeId = routeId, // Usamos o ID que veio da tela anterior apenas como referência local
-                    serverExecutionId = serverId,
-                    status = "IN_PROGRESS",
-                    startLat = lat,
-                    startLng = lng,
-                    startTimestamp = now
+            // 2. Se tiver sucesso, cria local
+            if (serverId != null) {
+                val now = System.currentTimeMillis()
+                execLocalId = executionDao.insert(
+                    ExecutionLocal(
+                        routeId = routeId,
+                        serverExecutionId = serverId,
+                        assignmentId = currentAssignmentId ?: 0L,
+                        initialKm = initialKm,
+                        status = "IN_PROGRESS",
+                        startLat = lat,
+                        startLng = lng,
+                        startTimestamp = now
+                    )
                 )
-            )
 
-            // 3. Registra ponto START
-            gpsDao.insert(
-                GpsRecordLocal(
-                    executionLocalId = execLocalId,
-                    timestamp = now,
-                    lat = lat,
-                    lng = lng,
-                    eventType = "START"
+                gpsDao.insert(
+                    GpsRecordLocal(
+                        executionLocalId = execLocalId,
+                        timestamp = now,
+                        lat = lat,
+                        lng = lng,
+                        eventType = "START"
+                    )
                 )
-            )
 
-            withContext(Dispatchers.Main) {
-                routeStarted = true
-                applyUiState()
-                val msg = if (serverId != null) "Rota iniciada! (Sync OK)" else "Rota iniciada Offline!"
-                Toast.makeText(this@StartRoute, msg, Toast.LENGTH_LONG).show()
+                withContext(Dispatchers.Main) {
+                    routeStarted = true
+                    applyUiState()
+                    Toast.makeText(this@StartRoute, "Rota Iniciada!", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                withContext(Dispatchers.Main) {
+                    stopLocationUpdates()
+                    Toast.makeText(this@StartRoute, "Falha ao iniciar rota no servidor.", Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
 
-    private fun finishRoute(finalKm: Int) {
-        stopLocationUpdates() // Desliga GPS
+    // --- MENUS E AÇÕES ---
 
-        // Pega última posição conhecida para o evento de fim
+    private fun showActionMenu() {
+        val options = arrayOf(
+            "Coleta em Ponto (Sucesso)",
+            "Ponto Não Coletado (Pulado)",
+            "Problema no Ponto",
+            "Problema Geral / Via",
+            "Abastecimento",
+            "Parada Almoço"
+        )
+
+        AlertDialog.Builder(this)
+            .setTitle("Registrar Ação")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> showPointDialog("POINT_COLLECTED")
+                    1 -> showPointDialog("POINT_SKIPPED")
+                    2 -> showPointDialog("POINT_PROBLEM")
+                    3 -> showGenericDialog("PROBLEM")
+                    4 -> showGenericDialog("FUEL")
+                    5 -> showGenericDialog("LUNCH")
+                }
+            }
+            .show()
+    }
+
+    private fun showPointDialog(eventType: String) {
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_point_action, null)
+        val etPointId = view.findViewById<EditText>(R.id.etPointId)
+        val etWeight = view.findViewById<EditText>(R.id.etWeight)
+        val spCondition = view.findViewById<Spinner>(R.id.spCondition)
+        val etDesc = view.findViewById<EditText>(R.id.etDescription)
+
+        val conditions = arrayOf("NORMAL", "SATURATED", "DAMAGED", "INACCESSIBLE")
+        spCondition.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, conditions)
+
+        AlertDialog.Builder(this)
+            .setTitle("Dados do Ponto")
+            .setView(view)
+            .setPositiveButton("Salvar") { _, _ ->
+                val idText = etPointId.text.toString()
+
+                // Validação Obrigatória para Pontos
+                if (idText.isEmpty()) {
+                    Toast.makeText(this, "ID do Ponto é obrigatório!", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+
+                prepareRecord(
+                    eventType = eventType,
+                    description = etDesc.text.toString(),
+                    pointId = idText.toLongOrNull(),
+                    weight = etWeight.text.toString().toDoubleOrNull(),
+                    condition = spCondition.selectedItem.toString()
+                )
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun showGenericDialog(eventType: String) {
+        val input = EditText(this)
+        input.hint = "Descrição (Opcional)"
+
+        AlertDialog.Builder(this)
+            .setTitle("Registro")
+            .setView(input)
+            .setPositiveButton("Salvar") { _, _ ->
+                prepareRecord(
+                    eventType = eventType,
+                    description = input.text.toString()
+                )
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun prepareRecord(
+        eventType: String,
+        description: String?,
+        pointId: Long? = null,
+        weight: Double? = null,
+        condition: String? = null
+    ) {
+        val lat = lastLocation?.latitude ?: 0.0
+        val lng = lastLocation?.longitude ?: 0.0
+
+        // Salva nos campos temporários (backup)
+        pendingEventType = eventType
+        pendingDesc = description
+        pendingPointId = pointId
+        pendingWeight = weight
+        pendingCondition = condition
+
+        val record = GpsRecordLocal(
+            executionLocalId = execLocalId,
+            timestamp = System.currentTimeMillis(),
+            lat = lat,
+            lng = lng,
+            eventType = eventType,
+            description = description,
+            pointId = pointId,
+            collectedWeight = weight,
+            pointCondition = condition
+        )
+
+        AlertDialog.Builder(this)
+            .setTitle("Foto")
+            .setMessage("Deseja tirar uma foto?")
+            .setPositiveButton("Sim") { _, _ ->
+                pendingRecord = record
+                launchCamera()
+            }
+            .setNegativeButton("Não") { _, _ ->
+                saveRecordToDb(record)
+                clearPendingData()
+            }
+            .show()
+    }
+
+    private fun launchCamera() {
+        try {
+            val photoFile = File.createTempFile("img_${System.currentTimeMillis()}", ".jpg", externalCacheDir)
+            currentPhotoPath = photoFile.absolutePath // Salva caminho String
+
+            val uri = FileProvider.getUriForFile(
+                this,
+                "${applicationContext.packageName}.provider",
+                photoFile
+            )
+            takePictureLauncher.launch(uri)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Erro ao abrir câmera", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun saveRecordToDb(record: GpsRecordLocal) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            gpsDao.insert(record)
+            withContext(Dispatchers.Main) {
+                Toast.makeText(this@StartRoute, "${record.eventType} salvo!", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // --- SINCRONIZAÇÃO FINAL ---
+
+    private fun finishRoute(finalKm: Int) {
+        stopLocationUpdates()
         val lat = lastLocation?.latitude ?: 0.0
         val lng = lastLocation?.longitude ?: 0.0
 
         lifecycleScope.launch(Dispatchers.IO) {
-            // 1. Recupera dados locais
             val localExec = executionDao.getById(execLocalId)
-            val serverId = localExec?.serverExecutionId
 
-            // 2. Se tem ID do servidor, tenta sincronizar
+            // Tenta recuperar ID do servidor se não tiver
+            var serverId = localExec?.serverExecutionId
+            if (serverId == null && localExec != null) {
+                serverId = recoverServerId(localExec)
+            }
+
             if (serverId != null) {
                 try {
-                    // Prepara batch de GPS
-                    val points = gpsDao.listByExecution(execLocalId)
-                    if (points.isNotEmpty()) {
-                        val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-                        val batch = points.map {
+                    val allPoints = gpsDao.listByExecution(execLocalId)
+                    val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US) // Sem Z para compatibilidade
+
+                    // Separa com/sem foto
+                    val (withPhoto, withoutPhoto) = allPoints.partition { !it.photoPath.isNullOrEmpty() }
+
+                    // 1. Envia Batch (Sem foto)
+                    if (withoutPhoto.isNotEmpty()) {
+                        val batch = withoutPhoto.map {
                             GpsRecordRequest(
                                 latitude = it.lat,
                                 longitude = it.lng,
                                 gps_timestamp = isoFormat.format(Date(it.timestamp)),
-                                event_type = it.eventType
+                                event_type = it.eventType,
+                                is_automatic = it.eventType == "NORMAL",
+                                is_offline = true,
+                                // Campos opcionais
+                                description = it.description,
+                                point_id = it.pointId,
+                                collected_weight_kg = it.collectedWeight,
+                                point_condition = it.pointCondition
                             )
                         }
-
-                        // Envia lote
                         RetrofitClient.getApiService(applicationContext).sendGpsBatch(serverId, batch)
                     }
 
-                    // Envia finalização da rota
+                    // 2. Envia Individual (Com foto)
+                    withPhoto.forEach { record ->
+                        uploadSingleRecordWithPhoto(serverId, record, isoFormat)
+                    }
+
+                    // 3. Finaliza
                     RetrofitClient.getApiService(applicationContext).completeExecution(
                         serverId,
                         CompleteExecutionRequest(finalKm, lat, lng)
                     )
 
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(applicationContext, "Dados sincronizados com sucesso!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(applicationContext, "Sincronizado com sucesso!", Toast.LENGTH_LONG).show()
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(applicationContext, "Erro na sincronização (salvo offline)", Toast.LENGTH_LONG).show()
+                        Toast.makeText(applicationContext, "Salvo offline. Erro no envio.", Toast.LENGTH_LONG).show()
                     }
+                }
+            } else {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(applicationContext, "Erro: Sem ID do servidor. Dados salvos apenas localmente.", Toast.LENGTH_LONG).show()
                 }
             }
 
-            // 3. Atualiza localmente
+            // Atualiza local
             if (localExec != null) {
                 executionDao.update(
-                    localExec.copy(
-                        endTimestamp = System.currentTimeMillis(),
-                        status = "COMPLETED",
-                        endLat = lat,
-                        endLng = lng
-                    )
+                    localExec.copy(endTimestamp = System.currentTimeMillis(), status = "COMPLETED", endLat = lat, endLng = lng)
                 )
             }
 
-            // Registra ponto END
-            gpsDao.insert(
-                GpsRecordLocal(
-                    executionLocalId = execLocalId,
-                    timestamp = System.currentTimeMillis(),
-                    lat = lat,
-                    lng = lng,
-                    eventType = "END"
-                )
-            )
-
-            withContext(Dispatchers.Main) {
-                finish() // Fecha a tela
-            }
+            withContext(Dispatchers.Main) { finish() }
         }
     }
 
-    // --- GPS Utils ---
+    private suspend fun recoverServerId(localExec: ExecutionLocal): Long? {
+        val api = RetrofitClient.getApiService(applicationContext)
+        try {
+            val current = api.getMyCurrentExecution()
+            if (current.isSuccessful) {
+                val id = current.body()?.data?.execution?.id
+                if (id != null) return id
+            }
+            val req = StartExecutionRequest(
+                assignment_id = localExec.assignmentId,
+                initial_km = localExec.initialKm,
+                latitude = localExec.startLat,
+                longitude = localExec.startLng,
+                initial_notes = "Recuperação automática"
+            )
+            val res = api.startExecution(req)
+            if (res.isSuccessful) return res.body()?.data?.execution?.id
+        } catch (e: Exception) { e.printStackTrace() }
+        return null
+    }
+
+    // Envio Multipart (Com Foto)
+    private suspend fun uploadSingleRecordWithPhoto(executionId: Long, record: GpsRecordLocal, sdf: SimpleDateFormat) {
+        try {
+            val file = File(record.photoPath!!)
+            if (!file.exists()) return
+
+            val mediaTypeImg = "image/*".toMediaTypeOrNull()
+            val reqFile = file.asRequestBody(mediaTypeImg)
+            val photoPart = MultipartBody.Part.createFormData("photo", file.name, reqFile)
+
+            val txt = "text/plain".toMediaTypeOrNull()
+
+            // Prepara partes opcionais (só envia se não for nulo)
+            // IMPORTANTE: Chaves em snake_case para bater com a API
+            val descPart = record.description?.toRequestBody(txt)
+            val pIdPart = record.pointId?.toString()?.toRequestBody(txt)
+            val wPart = record.collectedWeight?.toString()?.toRequestBody(txt)
+            val condPart = record.pointCondition?.toRequestBody(txt)
+
+            RetrofitClient.getApiService(applicationContext).sendGpsWithPhoto(
+                executionId = executionId,
+                latitude = record.lat.toString().toRequestBody(txt),
+                longitude = record.lng.toString().toRequestBody(txt),
+                timestamp = sdf.format(Date(record.timestamp)).toRequestBody(txt),
+                eventType = record.eventType.toRequestBody(txt),
+                isAutomatic = "false".toRequestBody(txt),
+                isOffline = "true".toRequestBody(txt),
+                photo = photoPart,
+                description = descPart,
+                pointId = pIdPart,
+                weight = wPart,
+                condition = condPart
+            )
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    // --- UTILS & PERMISSIONS ---
+    // (Mantenha os métodos auxiliares: fetchAssignment, checkPermissionsAndShowDialog, showKmDialog,
+    // startRouteWithLocation, createExecution, setupLocationCallback, startLocationUpdates,
+    // stopLocationUpdates, saveGpsPoint, applyUiState)
+
+    private fun fetchAssignment() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val response = RetrofitClient.getApiService(applicationContext).getMyAssignment()
+                if (response.isSuccessful) {
+                    val assignment = response.body()?.data?.assignment
+                    currentAssignmentId = assignment?.id
+                    withContext(Dispatchers.Main) {
+                        if (assignment != null) {
+                            tvHeader.text = assignment.route.name
+                            tvSub.text = "Veículo: ${assignment.vehicle.license_plate}"
+                        }
+                    }
+                }
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+    }
+
+    private fun checkPermissionsAndShowDialog() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            showKmDialog(isStart = true)
+        } else {
+            requestPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+        }
+    }
+
+    private fun showKmDialog(isStart: Boolean) {
+        val input = EditText(this)
+        input.inputType = InputType.TYPE_CLASS_NUMBER
+        input.hint = "KM do Painel"
+        AlertDialog.Builder(this)
+            .setTitle(if (isStart) "Iniciar" else "Finalizar")
+            .setView(input)
+            .setPositiveButton("OK") { _, _ ->
+                val km = input.text.toString().toIntOrNull()
+                if (km != null) {
+                    if (isStart) startRouteWithLocation(km) else finishRoute(km)
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
 
     private fun setupLocationCallback() {
         locationCallback = object : LocationCallback() {
-            override fun onLocationResult(locationResult: LocationResult) {
-                locationResult.lastLocation?.let { location ->
-                    lastLocation = location
-
-                    // Atualiza UI
-                    tvStatus.text = "GPS: %.4f, %.4f".format(location.latitude, location.longitude)
-
-                    // Salva ponto automático se estiver em rota
-                    if (routeStarted && execLocalId != 0L) {
-                        saveGpsPoint(location)
-                    }
+            override fun onLocationResult(res: LocationResult) {
+                res.lastLocation?.let {
+                    lastLocation = it
+                    tvStatus.text = "GPS: %.4f, %.4f".format(it.latitude, it.longitude)
+                    if (routeStarted && execLocalId != 0L) saveGpsPoint(it)
                 }
             }
         }
     }
 
     private fun startLocationUpdates() {
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10000)
-            .setMinUpdateIntervalMillis(5000)
-            .build()
-
-        try {
-            fusedLocationClient.requestLocationUpdates(
-                locationRequest,
-                locationCallback,
-                Looper.getMainLooper()
-            )
-        } catch (e: SecurityException) {
-            e.printStackTrace()
-        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
+        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10000).build()
+        try { fusedLocationClient.requestLocationUpdates(req, locationCallback, Looper.getMainLooper()) } catch (e: Exception) {}
     }
 
     private fun stopLocationUpdates() {
-        try {
-            fusedLocationClient.removeLocationUpdates(locationCallback)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        try { fusedLocationClient.removeLocationUpdates(locationCallback) } catch (e: Exception) {}
     }
 
     private fun saveGpsPoint(loc: Location) {
         lifecycleScope.launch(Dispatchers.IO) {
-            gpsDao.insert(
-                GpsRecordLocal(
-                    executionLocalId = execLocalId,
-                    timestamp = loc.time,
-                    lat = loc.latitude,
-                    lng = loc.longitude,
-                    eventType = "NORMAL"
-                )
-            )
+            gpsDao.insert(GpsRecordLocal(executionLocalId = execLocalId, timestamp = loc.time, lat = loc.latitude, lng = loc.longitude, eventType = "NORMAL"))
         }
-    }
-
-    private fun registerIncident() {
-        if (!routeStarted) return
-
-        val lat = lastLocation?.latitude ?: 0.0
-        val lng = lastLocation?.longitude ?: 0.0
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            gpsDao.insert(
-                GpsRecordLocal(
-                    executionLocalId = execLocalId,
-                    timestamp = System.currentTimeMillis(),
-                    lat = lat,
-                    lng = lng,
-                    eventType = "INCIDENT"
-                )
-            )
-        }
-        Toast.makeText(this, "Imprevisto registrado!", Toast.LENGTH_SHORT).show()
     }
 
     private fun applyUiState() {
         if (routeStarted) {
             btStart.visibility = android.view.View.GONE
             btFinish.visibility = android.view.View.VISIBLE
-            btIncident.isEnabled = true
+            btActions.isEnabled = true
         } else {
             btStart.visibility = android.view.View.VISIBLE
             btFinish.visibility = android.view.View.GONE
-            btIncident.isEnabled = false
+            btActions.isEnabled = false
         }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean("route_started", routeStarted)
         outState.putLong("exec_local_id", execLocalId)
-        if (currentAssignmentId != null) {
-            outState.putLong("assignment_id", currentAssignmentId!!)
-        }
-        super.onSaveInstanceState(outState)
-    }
+        if (currentAssignmentId != null) outState.putLong("assignment_id", currentAssignmentId!!)
 
-    override fun onSupportNavigateUp(): Boolean {
-        finish()
-        return true
+        outState.putString("photo_path", currentPhotoPath)
+        outState.putString("pending_type", pendingEventType)
+        outState.putString("pending_desc", pendingDesc)
+        if (pendingPointId != null) outState.putLong("pending_point_id", pendingPointId!!)
+        if (pendingWeight != null) outState.putDouble("pending_weight", pendingWeight!!)
+        outState.putString("pending_cond", pendingCondition)
+
+        super.onSaveInstanceState(outState)
     }
 }

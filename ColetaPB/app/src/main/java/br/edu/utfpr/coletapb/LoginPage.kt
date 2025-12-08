@@ -48,7 +48,7 @@ class LoginPage : AppCompatActivity() {
 
                                 Toast.makeText(this@LoginPage, "Login OK!", Toast.LENGTH_SHORT).show()
 
-                                val intent = Intent(this@LoginPage, TruckList::class.java)
+                                val intent = Intent(this@LoginPage, CurrentAssignmentList::class.java)
                                 startActivity(intent)
                                 finish()
                             } else {
