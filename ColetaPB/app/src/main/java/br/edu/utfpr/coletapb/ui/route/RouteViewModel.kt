@@ -1,18 +1,15 @@
-package br.edu.utfpr.coletapb.ui.route // Novo pacote
+package br.edu.utfpr.coletapb.ui.route
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import br.edu.utfpr.coletapb.data.RouteEntity
+import br.edu.utfpr.coletapb.data.model.RouteEntity // Importação correta
 import br.edu.utfpr.coletapb.data.repository.RouteRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.lang.IllegalArgumentException
 
-/**
- * Define os possíveis estados da tela da lista de rotas.
- */
 sealed class RouteUiState {
     object Idle : RouteUiState()
     object Loading : RouteUiState()
@@ -20,43 +17,46 @@ sealed class RouteUiState {
     data class Error(val message: String) : RouteUiState()
 }
 
-/**
- * O ViewModel que gerencia a lógica e o estado da RouteList.
- */
 class RouteViewModel(private val repository: RouteRepository) : ViewModel() {
 
     private val _routeState = MutableStateFlow<RouteUiState>(RouteUiState.Idle)
     val routeState: StateFlow<RouteUiState> = _routeState
 
-    /**
-     * Carrega as rotas do repositório
-     */
     fun loadRoutes(driverId: Long, truckId: Long) {
         viewModelScope.launch {
             _routeState.value = RouteUiState.Loading
             try {
-                // Chama o repositório
+                // O repositório retorna Response<RouteListResponse>
                 val response = repository.getRoutes(driverId, truckId)
 
                 if (response.isSuccessful && response.body() != null) {
-                    // Sucesso
-                    _routeState.value = RouteUiState.Success(response.body()!!)
+                    val apiData = response.body()!!.data
+
+                    // Converte os DTOs da API para as Entidades usadas na UI/Banco
+                    val routeEntities = apiData.routes.map { dto ->
+                        RouteEntity(
+                            id = dto.id,
+                            name = dto.name,
+                            description = dto.description,
+                            collection_type = dto.collection_type ?: "NORMAL",
+                            periodicity = dto.periodicity,
+                            priority = dto.priority ?: "MEDIUM",
+                            estimated_time_minutes = dto.estimated_time_minutes ?: 0,
+                            distance_km = dto.distance_km ?: 0.0
+                        )
+                    }
+
+                    _routeState.value = RouteUiState.Success(routeEntities)
                 } else {
-                    // Erro de API (ex: 404, 500)
                     _routeState.value = RouteUiState.Error("Falha ao buscar rotas: ${response.message()}")
                 }
             } catch (e: Exception) {
-                // Erro de conexão
                 _routeState.value = RouteUiState.Error("Erro de conexão: ${e.message}")
             }
         }
     }
 }
 
-/**
- * Factory necessária para criar o ViewModel, já que ele recebe
- * o RouteRepository como dependência no construtor.
- */
 class RouteViewModelFactory(private val repository: RouteRepository) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(RouteViewModel::class.java)) {

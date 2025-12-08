@@ -1,56 +1,54 @@
 package br.edu.utfpr.coletapb.data.model
 
-// --- Veículos (Vehicles) ---
-data class VehicleListResponse(
-    val success: Boolean,
-    val data: VehicleData
-)
+import com.google.gson.annotations.SerializedName
 
-data class VehicleData(
-    val vehicles: List<VehicleDto>
-)
-
+// --- Veículos ---
 data class VehicleDto(
     val id: Long,
-    val license_plate: String,
+    @SerializedName("license_plate") val license_plate: String, // CORRIGIDO: snake_case
     val model: String,
-    val brand: String,
-    val status: String
+    val brand: String? = null,
+    val status: String? = null,
+    val year: Int? = null
 )
 
-// --- Rotas (Routes) ---
-data class RouteListResponse(
-    val success: Boolean,
-    val data: RouteData
-)
-
-data class RouteData(
-    val routes: List<RouteDto>
-)
-
+// --- Rotas ---
 data class RouteDto(
     val id: Long,
     val name: String,
     val description: String?,
-    val collection_type: String,
+    @SerializedName("collection_type") val collection_type: String?, // CORRIGIDO: snake_case
     val periodicity: String?,
-    val priority: String,
-    val estimated_time_minutes: Int?,
-    val distance_km: Double?
+    val priority: String?,
+    @SerializedName("estimated_time_minutes") val estimated_time_minutes: Int?, // CORRIGIDO
+    @SerializedName("distance_km") val distance_km: Double? // CORRIGIDO
 )
 
-// --- Escala (Assignment) - Caso precise ---
+// --- Resposta de Lista de Rotas ---
+data class RouteListResponse(
+    val success: Boolean,
+    val data: RouteListData
+)
+
+data class RouteListData(
+    val routes: List<RouteDto>
+)
+
+// --- Escala (Assignment) ---
 data class AssignmentResponse(
     val success: Boolean,
-    val data: AssignmentWrapper
+    val data: AssignmentData
 )
 
-data class AssignmentWrapper(
+data class AssignmentData(
     val assignment: AssignmentDto
 )
 
 data class AssignmentDto(
     val id: Long,
     val route: RouteDto,
-    val vehicle: VehicleDto
+    val vehicle: VehicleDto,
+    val status: String,
+    @SerializedName("start_date") val start_date: String, // CORRIGIDO: snake_case
+    @SerializedName("end_date") val end_date: String?     // CORRIGIDO: snake_case
 )

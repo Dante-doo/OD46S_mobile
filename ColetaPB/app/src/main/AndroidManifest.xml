@@ -8,6 +8,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <queries>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -19,35 +25,41 @@
         android:theme="@style/Theme.ColetaPB"
         android:usesCleartextTraffic="true"
         tools:targetApi="31">
-
+        <activity
+            android:name=".CurrentAssignmentList"
+            android:exported="false" />
         <!-- Tela inicial -->
         <activity
             android:name=".LoginPage"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
+
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
-
-        <!-- Após login -->
+        </activity> <!-- Após login -->
         <activity
             android:name=".TruckList"
             android:exported="false"
-            android:parentActivityName=".LoginPage" />
-
-        <!-- Da lista de caminhões para rotas -->
+            android:parentActivityName=".LoginPage" /> <!-- Da lista de caminhões para rotas -->
         <activity
             android:name=".RouteList"
             android:exported="false"
-            android:parentActivityName=".TruckList" />
-
-        <!-- Da lista de rotas para iniciar rota -->
+            android:parentActivityName=".TruckList" /> <!-- Da lista de rotas para iniciar rota -->
         <activity
             android:name=".StartRoute"
             android:exported="false"
             android:parentActivityName=".RouteList" />
 
-
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.provider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
+
 </manifest>
