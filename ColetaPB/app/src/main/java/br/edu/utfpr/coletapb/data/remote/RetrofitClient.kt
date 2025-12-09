@@ -1,35 +1,38 @@
 package br.edu.utfpr.coletapb.data.remote
 
 import android.content.Context
-import br.edu.utfpr.coletapb.data.local.SessionManager
+import br.edu.utfpr.coletapb.config.ApiConfig
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 
 object RetrofitClient {
+    
+    private var context: Context? = null
+    
+    fun init(context: Context) {
+        this.context = context.applicationContext
+    }
 
-    private const val BASE_URL = "http://192.168.164.152:8080/api/v1/"
-
-    private var retrofit: Retrofit? = null
-
-    fun getApiService(context: Context): ApiService {
-        if (retrofit == null) {
-            val client = OkHttpClient.Builder()
-                .connectTimeout(30, TimeUnit.SECONDS) // Aumenta timeout para evitar erros em redes lentas
-                .readTimeout(30, TimeUnit.SECONDS)
-                .addInterceptor { chain ->
-                    val original = chain.request()
-                    val token = SessionManager.getToken(context)
-
-                    val requestBuilder = original.newBuilder()
-                    if (token != null) {
-                        requestBuilder.header("Authorization", "Bearer $token")
-                    }
-
-                    chain.proceed(requestBuilder.build())
-                }
-                .build()
+    // Cria a instância do Retrofit usando um builder
+    private val retrofit: Retrofit by lazy {
+        val clientBuilder = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+        
+        // Adiciona interceptor de autenticação se o contexto estiver disponível
+        context?.let {
+            clientBuilder.addInterceptor(AuthInterceptor(it))
+        }
+        
+        Retrofit.Builder()
+            .baseUrl(ApiConfig.BASE_URL) // 1. Define a URL base para todas as chamadas
+            .client(clientBuilder.build())
+            .addConverterFactory(GsonConverterFactory.create()) // 2. Adiciona o conversor Gson
+            .build() // 3. Constrói o objeto Retrofit
+    }
 
             retrofit = Retrofit.Builder()
                 .baseUrl(BASE_URL)

@@ -10,16 +10,7 @@ data class GpsRecordLocal(
     val timestamp: Long,
     val lat: Double,
     val lng: Double,
-
-    // Tipos: NORMAL, START, STOP, LUNCH, FUEL, PROBLEM,
-    // POINT_COLLECTED, POINT_SKIPPED, POINT_PROBLEM
-    val eventType: String,
-
-    val photoPath: String? = null,
-
-    // --- NOVOS CAMPOS (Baseados nos seus arquivos .bru) ---
-    val description: String? = null,      // Para LUNCH, FUEL, PROBLEM
-    val pointId: Long? = null,            // Para eventos de PONTO
-    val collectedWeight: Double? = null,  // Para POINT_COLLECTED / POINT_PROBLEM
-    val pointCondition: String? = null    // NORMAL, SATURATED, DAMAGED, INACCESSIBLE
+    val eventType: String,         // START | STOP | END | NORMAL | INCIDENT
+    val isOffline: Boolean = true, // Flag para indicar se precisa sincronizar
+    val backendId: Long? = null    // ID no backend após sincronização
 )

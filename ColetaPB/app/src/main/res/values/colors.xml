@@ -1,8 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Cores base -->
     <color name="black">#FF000000</color>
-    <color name="white">#EFEFEF</color>
-    <color name="blue">#FF0000FF</color>
-    <color name="light_blue">#0090FF</color>
-
+    <color name="white">#FFFFFF</color>
+    
+    <!-- Paleta de cores do sistema (baseada no front-end web) -->
+    <color name="primary_blue">#2148C0</color>
+    <color name="primary_blue_light">#3498db</color>
+    <color name="primary_blue_dark">#1a3a9a</color>
+    
+    <!-- Cores de fundo -->
+    <color name="background_light">#F5F6FA</color>
+    <color name="background_overlay">#2148C0</color>
+    <color name="background_overlay_alpha">#B32148C0</color>
+    
+    <!-- Cores de texto -->
+    <color name="text_primary">#2C3E50</color>
+    <color name="text_secondary">#34495E</color>
+    <color name="text_tertiary">#7F8C8D</color>
+    <color name="text_white">#FFFFFF</color>
+    
+    <!-- Cores de status -->
+    <color name="success">#27AE60</color>
+    <color name="warning">#F39C12</color>
+    <color name="error">#E74C3C</color>
+    <color name="info">#3498DB</color>
+    
+    <!-- Cores de cards -->
+    <color name="card_background">#FFFFFF</color>
+    <color name="card_border">#E0E0E0</color>
+    
+    <!-- Cores de botões -->
+    <color name="button_primary">#2148C0</color>
+    <color name="button_primary_text">#FFFFFF</color>
+    <color name="button_secondary">#FFFFFF</color>
+    <color name="button_secondary_text">#2148C0</color>
+    
+    <!-- Cores legadas (mantidas para compatibilidade) -->
+    <color name="blue">#2148C0</color>
+    <color name="light_blue">#3498DB</color>
+    
+    <!-- Cores para pontos de coleta -->
+    <color name="green_500">#4CAF50</color>
+    <color name="orange_500">#FF9800</color>
+    <color name="red_500">#F44336</color>
 </resources>

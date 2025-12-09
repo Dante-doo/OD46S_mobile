@@ -3,18 +3,23 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-
-    <queries>
-        <intent>
-            <action android:name="android.media.action.IMAGE_CAPTURE" />
-        </intent>
-    </queries>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <!-- Permissão para Android 13+ (API 33+) -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- Permissão de câmera -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    
+    <!-- Feature de câmera (opcional, mas recomendado) -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
+        android:name=".ColetaPBApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -24,10 +29,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.ColetaPB"
         android:usesCleartextTraffic="true"
-        tools:targetApi="31">
-        <activity
-            android:name=".CurrentAssignmentList"
-            android:exported="false" />
+        android:networkSecurityConfig="@xml/network_security_config"
+        tools:targetApi="31"
+        tools:replace="android:allowBackup">
+
         <!-- Tela inicial -->
         <activity
             android:name=".LoginPage"
@@ -51,15 +56,72 @@
             android:exported="false"
             android:parentActivityName=".RouteList" />
 
+        <!-- Lista de pontos da rota -->
+        <activity
+            android:name=".RoutePointsListActivity"
+            android:exported="false"
+            android:parentActivityName=".StartRoute" />
+
+        <!-- Registros da rota (eventos GPS) -->
+        <activity
+            android:name=".RouteRecordsActivity"
+            android:exported="false"
+            android:parentActivityName=".StartRoute" />
+
+        <!-- Lista de assignments (rotas disponíveis) -->
+        <activity
+            android:name=".AssignmentListActivity"
+            android:exported="false"
+            android:parentActivityName=".LoginPage" />
+
+        <!-- Detalhes do assignment -->
+        <activity
+            android:name=".AssignmentDetailsActivity"
+            android:exported="false"
+            android:parentActivityName=".AssignmentListActivity" />
+
+        <!-- Resumo da execução -->
+        <activity
+            android:name=".ExecutionSummaryActivity"
+            android:exported="false"
+            android:parentActivityName=".StartRoute" />
+
+        <!-- Mapa do trajeto da execução -->
+        <activity
+            android:name=".ExecutionMapActivity"
+            android:exported="false"
+            android:parentActivityName=".ExecutionSummaryActivity" />
+
+        <!-- Histórico de execuções -->
+        <activity
+            android:name=".ExecutionHistoryActivity"
+            android:exported="false"
+            android:parentActivityName=".AssignmentListActivity" />
+
+        <!-- Histórico de execuções de uma rota específica -->
+        <activity
+            android:name=".AssignmentRouteHistoryActivity"
+            android:exported="false"
+            android:parentActivityName=".AssignmentDetailsActivity" />
+
+        <!-- Serviço de rastreamento GPS -->
+        <service
+            android:name=".service.GpsTrackingService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
+        <!-- FileProvider para compartilhar fotos da câmera -->
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.provider"
+            android:authorities="${applicationId}.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data
                 android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths" />
+                android:resource="@xml/file_provider_paths" />
         </provider>
+
     </application>
 
 </manifest>

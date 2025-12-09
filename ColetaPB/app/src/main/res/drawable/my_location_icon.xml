@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Sombra externa suave (estilo Google Maps) -->
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#40000000" />
+            <size
+                android:width="48dp"
+                android:height="48dp" />
+        </shape>
+    </item>
+    
+    <!-- Círculo branco de fundo (estilo Google Maps) -->
+    <item
+        android:top="2dp"
+        android:left="2dp"
+        android:right="2dp"
+        android:bottom="2dp">
+        <shape android:shape="oval">
+            <solid android:color="#FFFFFF" />
+        </shape>
+    </item>
+    
+    <!-- Círculo azul do Google (#4285F4) -->
+    <item
+        android:top="6dp"
+        android:left="6dp"
+        android:right="6dp"
+        android:bottom="6dp">
+        <shape android:shape="oval">
+            <solid android:color="#4285F4" />
+        </shape>
+    </item>
+    
+    <!-- Ponto central branco (estilo Google Maps) -->
+    <item
+        android:top="18dp"
+        android:left="18dp"
+        android:right="18dp"
+        android:bottom="18dp">
+        <shape android:shape="oval">
+            <solid android:color="#FFFFFF" />
+        </shape>
+    </item>
+</layer-list>
+

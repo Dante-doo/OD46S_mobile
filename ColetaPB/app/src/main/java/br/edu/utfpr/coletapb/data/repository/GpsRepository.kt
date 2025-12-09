@@ -1,0 +1,251 @@
+package br.edu.utfpr.coletapb.data.repository
+
+import android.util.Log
+import br.edu.utfpr.coletapb.data.local.SharedPreferencesHelper
+import br.edu.utfpr.coletapb.data.model.GpsRecord
+import br.edu.utfpr.coletapb.data.model.GpsRecordRequest
+import br.edu.utfpr.coletapb.data.remote.RetrofitClient
+import br.edu.utfpr.coletapb.utils.DateUtils
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import org.json.JSONObject
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
+import java.util.Date
+
+class GpsRepository(private val prefsHelper: SharedPreferencesHelper) {
+    
+    suspend fun registerGpsPosition(
+        executionId: Long,
+        latitude: Double,
+        longitude: Double,
+        speedKmh: Double? = null,
+        headingDegrees: Double? = null,
+        accuracyMeters: Double? = null,
+        eventType: String = "NORMAL",
+        isAutomatic: Boolean = true,
+        isOffline: Boolean = false,
+        description: String? = null,
+        pointId: Long? = null,
+        collectedWeightKg: Double? = null,
+        pointCondition: String? = null,
+        photoFile: File? = null
+    ): Result<GpsRecord> = withContext(Dispatchers.IO) {
+        try {
+            Log.d("GpsRepository", "=== Iniciando registro GPS ===")
+            Log.d("GpsRepository", "executionId: $executionId")
+            Log.d("GpsRepository", "latitude: $latitude, longitude: $longitude")
+            Log.d("GpsRepository", "eventType: $eventType")
+            Log.d("GpsRepository", "pointId: $pointId")
+            Log.d("GpsRepository", "description: $description")
+            Log.d("GpsRepository", "isAutomatic: $isAutomatic, isOffline: $isOffline")
+            
+            val latitudeBody = latitude.toString().toRequestBody("text/plain".toMediaType())
+            val longitudeBody = longitude.toString().toRequestBody("text/plain".toMediaType())
+            
+            val speedBody = speedKmh?.toString()?.toRequestBody("text/plain".toMediaType())
+            // heading_degrees deve ser Integer (sem decimais)
+            val headingBody = headingDegrees?.let { 
+                it.toInt().toString().toRequestBody("text/plain".toMediaType())
+            }
+            // accuracy_meters pode ser Double, mas remove .0 desnecessário se for inteiro
+            val accuracyBody = accuracyMeters?.let {
+                val accuracyValue = if (it % 1.0 == 0.0) {
+                    it.toInt().toString()
+                } else {
+                    it.toString()
+                }
+                accuracyValue.toRequestBody("text/plain".toMediaType())
+            }
+            val eventTypeBody = eventType.toRequestBody("text/plain".toMediaType())
+            val isAutomaticBody = isAutomatic.toString().toRequestBody("text/plain".toMediaType())
+            val isOfflineBody = isOffline.toString().toRequestBody("text/plain".toMediaType())
+            val descriptionBody = description?.toRequestBody("text/plain".toMediaType())
+            val pointIdBody = pointId?.toString()?.toRequestBody("text/plain".toMediaType())
+            val weightBody = collectedWeightKg?.toString()?.toRequestBody("text/plain".toMediaType())
+            val conditionBody = pointCondition?.toRequestBody("text/plain".toMediaType())
+            
+            // Converte timestamp atual para UTC antes de enviar
+            val gpsTimestampUtc = DateUtils.formatLocalToUtc(Date()) ?: ""
+            val gpsTimestampBody = gpsTimestampUtc.toRequestBody("text/plain".toMediaType())
+            
+            var photoPart: MultipartBody.Part? = null
+            if (photoFile != null && photoFile.exists()) {
+                val requestFile = photoFile.asRequestBody("image/jpeg".toMediaType())
+                photoPart = MultipartBody.Part.createFormData("photo", photoFile.name, requestFile)
+                Log.d("GpsRepository", "Foto anexada: ${photoFile.name}")
+            }
+            
+            Log.d("GpsRepository", "Chamando API: POST /executions/$executionId/gps")
+            val response = RetrofitClient.apiService.registerGpsPosition(
+                executionId = executionId,
+                latitude = latitudeBody,
+                longitude = longitudeBody,
+                speedKmh = speedBody,
+                headingDegrees = headingBody,
+                accuracyMeters = accuracyBody,
+                eventType = eventTypeBody,
+                isAutomatic = isAutomaticBody,
+                isOffline = isOfflineBody,
+                gpsTimestamp = gpsTimestampBody,
+                description = descriptionBody,
+                pointId = pointIdBody,
+                collectedWeightKg = weightBody,
+                pointCondition = conditionBody,
+                photo = photoPart
+            )
+            
+            Log.d("GpsRepository", "Resposta recebida: code=${response.code()}, isSuccessful=${response.isSuccessful}")
+            
+            if (response.isSuccessful && response.body() != null) {
+                val body = response.body()!!
+                Log.d("GpsRepository", "Body da resposta: $body")
+                
+                // Backend retorna { success: true, data: { gps_record: { ... } } }
+                val data = body["data"] as? Map<String, Any>
+                val gpsRecord = data?.get("gps_record") as? Map<String, Any> ?: data
+                
+                if (gpsRecord != null) {
+                    Log.d("GpsRepository", "GPS record recebido: $gpsRecord")
+                    val record = try {
+                        GpsRecord(
+                            id = (gpsRecord["id"] as? Number)?.toLong() ?: 0L,
+                            executionId = executionId,
+                            latitude = (gpsRecord["latitude"] as? Number)?.toDouble() ?: latitude,
+                            longitude = (gpsRecord["longitude"] as? Number)?.toDouble() ?: longitude,
+                            speedKmh = (gpsRecord["speed_kmh"] as? Number)?.toDouble(),
+                            headingDegrees = (gpsRecord["heading_degrees"] as? Number)?.toDouble(),
+                            accuracyMeters = (gpsRecord["accuracy_meters"] as? Number)?.toDouble(),
+                            eventType = gpsRecord["event_type"] as? String ?: eventType,
+                            isAutomatic = gpsRecord["is_automatic"] as? Boolean ?: isAutomatic,
+                            isOffline = gpsRecord["is_offline"] as? Boolean ?: isOffline,
+                            gpsTimestamp = gpsRecord["gps_timestamp"] as? String ?: "",
+                            description = gpsRecord["description"] as? String,
+                            pointId = (gpsRecord["point_id"] as? Number)?.toLong(),
+                            collectedWeightKg = (gpsRecord["collected_weight_kg"] as? Number)?.toDouble(),
+                            pointCondition = gpsRecord["point_condition"] as? String
+                        )
+                    } catch (e: Exception) {
+                        Log.e("GpsRepository", "Erro ao mapear GPS record: ${e.message}", e)
+                        null
+                    }
+                    
+                    if (record != null) {
+                        Log.d("GpsRepository", "GPS registrado com sucesso: id=${record.id}")
+                        Result.success(record)
+                    } else {
+                        Log.e("GpsRepository", "Erro: record é null após mapeamento")
+                        Result.failure(Exception("Erro ao processar resposta do GPS"))
+                    }
+                } else {
+                    Log.e("GpsRepository", "Erro: data ou gps_record é null na resposta")
+                    Result.failure(Exception("Resposta vazia do servidor"))
+                }
+            } else {
+                val errorBody = response.errorBody()?.string() ?: "Erro desconhecido"
+                Log.e("GpsRepository", "=== ERRO AO REGISTRAR GPS ===")
+                Log.e("GpsRepository", "HTTP Code: ${response.code()}")
+                Log.e("GpsRepository", "Error Body: $errorBody")
+                Log.e("GpsRepository", "executionId: $executionId")
+                Log.e("GpsRepository", "eventType: $eventType")
+                Log.e("GpsRepository", "latitude: $latitude, longitude: $longitude")
+                
+                // Tenta extrair a mensagem do JSON de erro do backend
+                val errorMessage = try {
+                    val json = org.json.JSONObject(errorBody)
+                    val errorObj = json.optJSONObject("error")
+                    errorObj?.optString("message") ?: json.optString("message") ?: errorBody
+                } catch (e: Exception) {
+                    // Se não conseguir parsear como JSON, usa o corpo do erro diretamente
+                    Log.e("GpsRepository", "Erro ao parsear JSON de erro: ${e.message}")
+                    errorBody
+                }
+                
+                Log.e("GpsRepository", "Mensagem de erro extraída: $errorMessage")
+                Result.failure(Exception("Erro ao registrar GPS: ${response.code()} - $errorMessage"))
+            }
+        } catch (e: Exception) {
+            Log.e("GpsRepository", "Exceção ao registrar GPS: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+    
+    suspend fun registerGpsBatch(
+        executionId: Long,
+        records: List<GpsRecordRequest>
+    ): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            // Converte para List<Map<String, Any>> sem wildcards para evitar erro do Retrofit
+            // Usa HashMap para garantir tipo exato Map<String, Any>
+            val recordsMap: List<Map<String, Any>> = records.map { record ->
+                val map = HashMap<String, Any>().apply {
+                    put("latitude", record.latitude)
+                    put("longitude", record.longitude)
+                    put("event_type", record.event_type)
+                    
+                    record.speed_kmh?.let { put("speed_kmh", it) }
+                    record.heading_degrees?.let { put("heading_degrees", it) }
+                    record.accuracy_meters?.let { put("accuracy_meters", it) }
+                    record.is_automatic?.let { put("is_automatic", it) }
+                    record.is_offline?.let { put("is_offline", it) }
+                    record.gps_timestamp?.let { put("gps_timestamp", it) }
+                    record.description?.let { put("description", it) }
+                    record.point_id?.let { put("point_id", it) }
+                    record.collected_weight_kg?.let { put("collected_weight_kg", it) }
+                    record.point_condition?.let { put("point_condition", it) }
+                }
+                map as Map<String, Any>
+            }
+            
+            Log.d("GpsRepository", "📤 Enviando ${records.size} registros GPS via batch para execução $executionId")
+            
+            val response = RetrofitClient.apiService.registerGpsBatch(executionId, recordsMap)
+            
+            if (response.isSuccessful && response.body() != null) {
+                val body = response.body()!!
+                Log.d("GpsRepository", "✅ Resposta do batch recebida: $body")
+                
+                // O backend retorna a resposta dentro de "data"
+                val data = body["data"] as? Map<*, *>
+                if (data != null) {
+                    Log.d("GpsRepository", "📊 Dados da resposta: $data")
+                    
+                    // Backend retorna "success_count" (não "saved_count")
+                    val successCount = (data["success_count"] as? Number)?.toInt() 
+                        ?: (data["saved_count"] as? Number)?.toInt() // Fallback para compatibilidade
+                        ?: records.size
+                    
+                    val totalRecords = (data["total_records"] as? Number)?.toInt() ?: records.size
+                    val errorCount = (data["error_count"] as? Number)?.toInt() ?: 0
+                    
+                    Log.d("GpsRepository", "✅ Batch sincronizado: $successCount de $totalRecords registros (erros: $errorCount)")
+                    
+                    if (errorCount > 0) {
+                        val errorsList = data["errors"] as? List<*>
+                        Log.w("GpsRepository", "⚠️ Alguns registros falharam: $errorsList")
+                    }
+                    
+                    Result.success(successCount)
+                } else {
+                    // Se não tem "data", tenta ler diretamente do body
+                    val savedCount = (body["saved_count"] as? Number)?.toInt() 
+                        ?: (body["success_count"] as? Number)?.toInt()
+                        ?: records.size
+                    Log.d("GpsRepository", "✅ Batch sincronizado (formato alternativo): $savedCount de ${records.size} registros")
+                    Result.success(savedCount)
+                }
+            } else {
+                val errorMsg = response.errorBody()?.string() ?: "Erro desconhecido"
+                Log.e("GpsRepository", "❌ Erro ao registrar GPS em lote: HTTP ${response.code()} - $errorMsg")
+                Result.failure(Exception("Erro ao registrar GPS em lote: ${response.code()} - $errorMsg"))
+            }
+        } catch (e: Exception) {
+            Log.e("GpsRepository", "Exceção ao registrar GPS em lote: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+}
+

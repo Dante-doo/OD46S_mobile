@@ -45,8 +45,7 @@ android:background="@drawable/img_trash_truck_blue2">
         android:textColor="@color/white"
         app:layout_constraintTop_toBottomOf="@id/tvSub"
         app:layout_constraintStart_toStartOf="@id/tvSub"
-        app:layout_constraintEnd_toEndOf="@id/tvSub"
-        app:layout_constraintBottom_toTopOf="@+id/btIncident" />
+        app:layout_constraintEnd_toEndOf="@id/tvSub" />
 
     <!-- FINALIZAR (mesmo lugar, começa oculto) -->
     <Button
@@ -62,20 +61,65 @@ android:background="@drawable/img_trash_truck_blue2">
         android:visibility="gone"
         app:layout_constraintTop_toBottomOf="@id/tvSub"
         app:layout_constraintStart_toStartOf="@id/tvSub"
-        app:layout_constraintEnd_toEndOf="@id/tvSub"
-        app:layout_constraintBottom_toTopOf="@+id/btIncident" />
+        app:layout_constraintEnd_toEndOf="@id/tvSub" />
 
+    <!-- Botão legacy (não usado diretamente na UI, mantido para compatibilidade de código) -->
     <Button
         android:id="@+id/btIncident"
         android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"/>
+
+    <!-- Linha de ações de GPS -->
+    <LinearLayout
+        android:id="@+id/llGpsActions"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginTop="16dp"
+        app:layout_constraintTop_toBottomOf="@id/btStart"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <Button
+            android:id="@+id/btPointCollected"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="8dp"
+            android:text="COLETA REALIZADA"
+            android:textAllCaps="false"
+            android:backgroundTint="@color/light_blue"
+            android:textColor="@color/white" />
+
+        <Button
+            android:id="@+id/btProblem"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:text="IMPREVISTO"
+            android:textAllCaps="false"
+            android:backgroundTint="@color/light_blue"
+            android:textColor="@color/white" />
+    </LinearLayout>
+
+    <!-- Cancelar rota com registro -->
+    <Button
+        android:id="@+id/btCancelRoute"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
         android:layout_marginBottom="32dp"
-        android:text="IMPREVISTO"
+        android:text="CANCELAR ROTA"
         android:textAllCaps="false"
-        android:backgroundTint="@color/light_blue"
+        android:backgroundTint="@android:color/holo_red_dark"
         android:textColor="@color/white"
-        android:enabled="true"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="@id/btFinish"
-        app:layout_constraintEnd_toEndOf="@id/btFinish" />
+        app:layout_constraintTop_toBottomOf="@id/llGpsActions"
+        app:layout_constraintStart_toStartOf="@id/llGpsActions"
+        app:layout_constraintEnd_toEndOf="@id/llGpsActions"
+        app:layout_constraintBottom_toBottomOf="parent" />
 </androidx.constraintlayout.widget.ConstraintLayout>
