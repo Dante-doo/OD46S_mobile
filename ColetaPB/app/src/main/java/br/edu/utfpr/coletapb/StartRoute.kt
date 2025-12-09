@@ -163,11 +163,12 @@ class StartRoute : AppCompatActivity() {
         // Remove ActionBar padrão
         supportActionBar?.hide()
         
-        // extras vindos da RouteList
+        // extras vindos da RouteList ou AssignmentDetails
         routeId = intent.getLongExtra("route_id", 0L)
         assignmentId = intent.getLongExtra("assignment_id", 0L)
         routeName = intent.getStringExtra("route_name")
         routeInfo = intent.getStringExtra("route_info")
+        val executionIdFromIntent = intent.getLongExtra("execution_id", 0L).takeIf { it > 0 }
         
         // Configura MaterialToolbar
         val toolbar = findViewById<MaterialToolbar>(R.id.topAppBar)
@@ -535,8 +536,15 @@ class StartRoute : AppCompatActivity() {
         // NÃO restaura routeStarted do savedInstanceState - sempre verifica no backend primeiro
         routeStarted = false
         
-        // Verifica se há execução em andamento (isso vai atualizar routeStarted corretamente)
-        checkCurrentExecution()
+        // Se recebeu execution_id no intent, usa ele diretamente
+        if (executionIdFromIntent != null) {
+            Log.d("StartRoute", "Execution ID recebido no intent: $executionIdFromIntent")
+            backendExecutionId = executionIdFromIntent
+            checkExecutionById(executionIdFromIntent)
+        } else {
+            // Verifica se há execução em andamento (isso vai atualizar routeStarted corretamente)
+            checkCurrentExecution()
+        }
         
         // Aplica estado inicial (será atualizado após checkCurrentExecution)
         applyUiState()
@@ -889,6 +897,183 @@ class StartRoute : AppCompatActivity() {
 
         // Não restaurou nada
         return false
+    }
+    
+    /**
+     * Verifica execução específica pelo ID (quando recebido via intent)
+     */
+    private fun checkExecutionById(executionId: Long) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                Log.d("StartRoute", "Verificando execução pelo ID: $executionId")
+                
+                // Primeiro verifica no banco local se já existe execução com esse backendId
+                val localExec = executionDao.getCurrentExecution()
+                if (localExec != null && localExec.backendId == executionId) {
+                    Log.d("StartRoute", "Execução encontrada no banco local: execLocalId=${localExec.localId}")
+                    execLocalId = localExec.localId
+                    backendExecutionId = executionId
+                    
+                    withContext(Dispatchers.Main) {
+                        routeStarted = true
+                        applyUiState()
+                        
+                        if (::bottomSheetBehavior.isInitialized) {
+                            bottomSheetBehavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED
+                            showActionButtons()
+                        }
+                        
+                        if (checkLocationPermissions()) {
+                            startGpsTracking()
+                        }
+                    }
+                    return@launch
+                }
+                
+                // Se não encontrou no banco local, busca no backend
+                val result = executionRepository.getMyCurrentExecution()
+                
+                result.fold(
+                    onSuccess = { execution ->
+                        if (execution != null && execution.id == executionId && execution.status == "IN_PROGRESS") {
+                            // Execução encontrada e está em andamento
+                            backendExecutionId = execution.id
+                            
+                            // Converte timestamp do backend (UTC) para millis local
+                            val startTimestamp = try {
+                                execution.startTime?.let { utcString ->
+                                    DateUtils.parseUtcToLocal(utcString)?.time
+                                } ?: System.currentTimeMillis()
+                            } catch (e: Exception) {
+                                Log.e("StartRoute", "Erro ao converter startTime: ${e.message}", e)
+                                System.currentTimeMillis()
+                            }
+                            
+                            // Cria ou atualiza execução local
+                            if (localExec != null) {
+                                // Atualiza execução local existente
+                                val updatedExec = localExec.copy(
+                                    routeId = routeId,
+                                    status = "IN_PROGRESS",
+                                    startTimestamp = startTimestamp,
+                                    startLat = execution.startLat ?: localExec.startLat,
+                                    startLng = execution.startLng ?: localExec.startLng,
+                                    backendId = execution.id
+                                )
+                                executionDao.update(updatedExec)
+                                execLocalId = localExec.localId
+                            } else {
+                                // Cria execução local sincronizada com backend
+                                val executionLocal = ExecutionLocal(
+                                    routeId = routeId,
+                                    vehicleId = null,
+                                    driverId = prefsHelper.getDriverId().takeIf { it > 0 },
+                                    startTimestamp = startTimestamp,
+                                    startLat = execution.startLat ?: 0.0,
+                                    startLng = execution.startLng ?: 0.0,
+                                    status = "IN_PROGRESS",
+                                    backendId = execution.id
+                                )
+                                execLocalId = executionDao.insert(executionLocal)
+                            }
+                            
+                            Log.d("StartRoute", "Execução encontrada e restaurada: id=$executionId, execLocalId=$execLocalId")
+                            
+                            withContext(Dispatchers.Main) {
+                                routeStarted = true
+                                applyUiState()
+                                
+                                if (::bottomSheetBehavior.isInitialized) {
+                                    bottomSheetBehavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED
+                                    showActionButtons()
+                                }
+                                
+                                if (checkLocationPermissions()) {
+                                    startGpsTracking()
+                                }
+                            }
+                        } else {
+                            Log.w("StartRoute", "Execução $executionId não encontrada ou não está em andamento (status: ${execution?.status})")
+                            // Se não encontrou no backend, mas temos o ID, assume que está em andamento
+                            // (pode ser que ainda não tenha sincronizado)
+                            if (localExec == null) {
+                                // Cria execução local temporária
+                                val executionLocal = ExecutionLocal(
+                                    routeId = routeId,
+                                    vehicleId = null,
+                                    driverId = prefsHelper.getDriverId().takeIf { it > 0 },
+                                    startTimestamp = System.currentTimeMillis(),
+                                    startLat = 0.0,
+                                    startLng = 0.0,
+                                    status = "IN_PROGRESS",
+                                    backendId = executionId
+                                )
+                                execLocalId = executionDao.insert(executionLocal)
+                                backendExecutionId = executionId
+                                
+                                withContext(Dispatchers.Main) {
+                                    routeStarted = true
+                                    applyUiState()
+                                    
+                                    if (::bottomSheetBehavior.isInitialized) {
+                                        bottomSheetBehavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED
+                                        showActionButtons()
+                                    }
+                                    
+                                    if (checkLocationPermissions()) {
+                                        startGpsTracking()
+                                    }
+                                }
+                            } else {
+                                withContext(Dispatchers.Main) {
+                                    routeStarted = false
+                                    applyUiState()
+                                }
+                            }
+                        }
+                    },
+                    onFailure = { error ->
+                        Log.e("StartRoute", "Erro ao buscar execução $executionId: ${error.message}", error)
+                        // Em caso de erro, cria execução local temporária com o ID recebido
+                        if (localExec == null) {
+                            val executionLocal = ExecutionLocal(
+                                routeId = routeId,
+                                vehicleId = null,
+                                driverId = prefsHelper.getDriverId().takeIf { it > 0 },
+                                startTimestamp = System.currentTimeMillis(),
+                                startLat = 0.0,
+                                startLng = 0.0,
+                                status = "IN_PROGRESS",
+                                backendId = executionId
+                            )
+                            execLocalId = executionDao.insert(executionLocal)
+                            backendExecutionId = executionId
+                            
+                            withContext(Dispatchers.Main) {
+                                routeStarted = true
+                                applyUiState()
+                                
+                                if (::bottomSheetBehavior.isInitialized) {
+                                    bottomSheetBehavior.state = com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_COLLAPSED
+                                    showActionButtons()
+                                }
+                                
+                                if (checkLocationPermissions()) {
+                                    startGpsTracking()
+                                }
+                            }
+                        } else {
+                            // Em caso de erro, tenta verificar execução atual normalmente
+                            checkCurrentExecution()
+                        }
+                    }
+                )
+            } catch (e: Exception) {
+                Log.e("StartRoute", "Exceção ao verificar execução $executionId: ${e.message}", e)
+                // Em caso de exceção, tenta verificar execução atual normalmente
+                checkCurrentExecution()
+            }
+        }
     }
     
     private fun checkCurrentExecution() {
@@ -2358,14 +2543,35 @@ class StartRoute : AppCompatActivity() {
         // Detecta movimento real (filtra ruído GPS)
         val isMovingNow = detectRealMovement(location)
         
-        // Atualiza o marker customizado apenas se houver movimento real
-        // Isso evita "tremedeira" do marcador quando parado
-        if (isMovingNow) {
+        // Atualiza o marker customizado
+        // Se está em movimento: atualiza sempre
+        // Se está parado: atualiza apenas se a distância for significativa (>= 5m) para evitar ruído visual
+        val shouldUpdateMarker = if (isMovingNow) {
+            true // Em movimento: sempre atualiza
+        } else {
+            // Parado: atualiza apenas se moveu pelo menos 5m desde última atualização
+            // Isso evita "tremedeira" mas ainda mostra atualizações significativas
+            val lastMarkerLocation = currentLocationMarker?.position?.let { 
+                Location("marker").apply {
+                    latitude = it.latitude
+                    longitude = it.longitude
+                }
+            }
+            
+            if (lastMarkerLocation != null) {
+                val distance = lastMarkerLocation.distanceTo(location)
+                distance >= 5.0f // Atualiza se moveu pelo menos 5m
+            } else {
+                true // Primeira vez: sempre atualiza
+            }
+        }
+        
+        if (shouldUpdateMarker) {
             updateLocationMarkerPosition(location)
         } else {
-            // Parado: não atualiza posição do marcador para evitar ruído visual
+            // Parado e movimento pequeno: não atualiza posição do marcador para evitar ruído visual
             // Mas atualiza currentLocation para uso em outras funcionalidades
-            Log.d("StartRoute", "Parado detectado, não atualizando marcador visual (ruído GPS filtrado)")
+            Log.d("StartRoute", "Parado detectado, não atualizando marcador visual (movimento < 5m, ruído GPS filtrado)")
         }
         
         // Atualiza informações do próximo ponto com throttling (evita processamento excessivo)

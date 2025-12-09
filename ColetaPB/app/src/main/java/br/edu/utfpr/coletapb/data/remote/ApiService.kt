@@ -38,7 +38,8 @@ interface ApiService {
     @GET("routes")
     suspend fun getRoutes(
         @Query("driverId") driverId: Long? = null,
-        @Query("truckId") truckId: Long? = null
+        @Query("truckId") truckId: Long? = null,
+        @Query("limit") limit: Int = 1000
     ): Response<List<RouteEntity>>
 
     /**

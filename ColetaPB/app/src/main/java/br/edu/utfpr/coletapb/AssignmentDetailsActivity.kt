@@ -20,11 +20,20 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.Tasks
 import androidx.core.content.ContextCompat
+import androidx.core.app.ActivityCompat
 import android.content.pm.PackageManager
+import android.Manifest
+import androidx.appcompat.app.AlertDialog
 import com.google.android.material.appbar.MaterialToolbar
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationResult
 import java.util.concurrent.TimeUnit
 
 /**
@@ -55,6 +64,10 @@ class AssignmentDetailsActivity : AppCompatActivity() {
     private lateinit var btnContinueRoute: Button
     private lateinit var btnViewHistory: Button
     private lateinit var tvExecutorInfo: TextView
+    
+    companion object {
+        private const val PERMISSION_REQUEST_CODE = 1001
+    }
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -365,33 +378,204 @@ class AssignmentDetailsActivity : AppCompatActivity() {
     }
     
     /**
+     * Verifica se as permissões de localização foram concedidas
+     */
+    private fun checkLocationPermissions(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED ||
+        ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+    
+    /**
+     * Solicita permissões de localização
+     */
+    private fun requestLocationPermissions() {
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ),
+            PERMISSION_REQUEST_CODE
+        )
+    }
+    
+    /**
+     * Obtém localização atual de forma robusta, tentando múltiplas estratégias
+     */
+    private suspend fun getCurrentLocationWithRetry(timeoutSeconds: Long = 15): Location? = withContext(Dispatchers.IO) {
+        if (!checkLocationPermissions()) {
+            Log.w("AssignmentDetails", "Sem permissão de localização")
+            // Tenta solicitar permissões na thread principal
+            withContext(Dispatchers.Main) {
+                if (shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION)) {
+                    // Usuário negou antes, mostra explicação
+                    AlertDialog.Builder(this@AssignmentDetailsActivity)
+                        .setTitle("Permissão Necessária")
+                        .setMessage("Este aplicativo precisa de permissão de localização para registrar coletas e rastrear a rota.")
+                        .setPositiveButton("Conceder") { _, _ ->
+                            requestLocationPermissions()
+                        }
+                        .setNegativeButton("Cancelar", null)
+                        .show()
+                } else {
+                    // Primeira vez, solicita diretamente
+                    requestLocationPermissions()
+                }
+            }
+            return@withContext null
+        }
+        
+        try {
+            // Estratégia 1: Tenta obter localização em cache (mais rápido)
+            val cachedLocation = try {
+                fusedLocationClient.lastLocation.result
+            } catch (e: Exception) {
+                null
+            }
+            
+            if (cachedLocation != null && cachedLocation.accuracy < 100f) {
+                // Localização em cache é válida se accuracy < 100m
+                Log.d("AssignmentDetails", "Usando localização em cache: lat=${cachedLocation.latitude}, lng=${cachedLocation.longitude}, accuracy=${cachedLocation.accuracy}m")
+                return@withContext cachedLocation
+            }
+            
+            // Estratégia 2: Solicita localização atual com timeout
+            Log.d("AssignmentDetails", "Solicitando localização atual (timeout: ${timeoutSeconds}s)...")
+            val locationTask = fusedLocationClient.getCurrentLocation(
+                Priority.PRIORITY_HIGH_ACCURACY,
+                null
+            )
+            
+            try {
+                val location = withTimeout(timeoutSeconds * 1000) {
+                    Tasks.await(locationTask)
+                }
+                
+                if (location != null) {
+                    Log.d("AssignmentDetails", "Localização obtida: lat=${location.latitude}, lng=${location.longitude}, accuracy=${location.accuracy}m")
+                    return@withContext location
+                }
+            } catch (e: TimeoutCancellationException) {
+                Log.w("AssignmentDetails", "Timeout ao obter localização atual")
+            } catch (e: Exception) {
+                Log.w("AssignmentDetails", "Erro ao obter localização atual: ${e.message}")
+            }
+            
+            // Estratégia 3: Solicita atualizações temporárias de localização
+            Log.d("AssignmentDetails", "Tentando obter localização via atualizações temporárias...")
+            var finalLocation: Location? = null
+            val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L)
+                .setMaxUpdateDelayMillis(2000L)
+                .setWaitForAccurateLocation(false)
+                .build()
+            
+            val locationCallback = object : LocationCallback() {
+                override fun onLocationResult(result: LocationResult) {
+                    result.lastLocation?.let { location ->
+                        if (location.accuracy < 100f || finalLocation == null) {
+                            finalLocation = location
+                            Log.d("AssignmentDetails", "Localização obtida via callback: lat=${location.latitude}, lng=${location.longitude}, accuracy=${location.accuracy}m")
+                        }
+                    }
+                }
+            }
+            
+            try {
+                fusedLocationClient.requestLocationUpdates(
+                    locationRequest,
+                    locationCallback,
+                    android.os.Looper.getMainLooper()
+                )
+                
+                // Aguarda até obter uma localização ou timeout
+                val startTime = System.currentTimeMillis()
+                while (finalLocation == null && (System.currentTimeMillis() - startTime) < timeoutSeconds * 1000) {
+                    delay(500)
+                }
+                
+                fusedLocationClient.removeLocationUpdates(locationCallback)
+                
+                if (finalLocation != null) {
+                    Log.d("AssignmentDetails", "Localização obtida via atualizações: lat=${finalLocation!!.latitude}, lng=${finalLocation!!.longitude}")
+                    return@withContext finalLocation
+                }
+            } catch (e: Exception) {
+                Log.e("AssignmentDetails", "Erro ao solicitar atualizações de localização: ${e.message}", e)
+                fusedLocationClient.removeLocationUpdates(locationCallback)
+            }
+            
+            // Se ainda não tem localização, usa a do cache mesmo que seja menos precisa
+            if (cachedLocation != null) {
+                Log.w("AssignmentDetails", "Usando localização em cache (menos precisa): lat=${cachedLocation.latitude}, lng=${cachedLocation.longitude}, accuracy=${cachedLocation.accuracy}m")
+                return@withContext cachedLocation
+            }
+            
+            Log.w("AssignmentDetails", "Não foi possível obter localização após todas as tentativas")
+            null
+        } catch (e: Exception) {
+            Log.e("AssignmentDetails", "Exceção ao obter localização: ${e.message}", e)
+            null
+        }
+    }
+    
+    /**
      * Inicia uma nova execução
      */
     private fun startRoute() {
+        // Verifica permissões antes de iniciar
+        if (!checkLocationPermissions()) {
+            Log.d("AssignmentDetails", "Permissões de localização não concedidas. Solicitando...")
+            if (shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION)) {
+                // Usuário negou antes, mostra explicação
+                AlertDialog.Builder(this)
+                    .setTitle("Permissão Necessária")
+                    .setMessage("Este aplicativo precisa de permissão de localização para iniciar a rota e registrar coletas.")
+                    .setPositiveButton("Conceder") { _, _ ->
+                        requestLocationPermissions()
+                    }
+                    .setNegativeButton("Cancelar", null)
+                    .show()
+            } else {
+                // Primeira vez, solicita diretamente
+                requestLocationPermissions()
+            }
+            return
+        }
+        
+        // Verifica se GPS está habilitado
+        if (!gpsMonitor.isGpsEnabled()) {
+            gpsMonitor.checkAndRequestGps(
+                onGpsEnabled = {
+                    // GPS foi habilitado, tenta iniciar a rota novamente
+                    startRoute()
+                },
+                onGpsDisabled = {
+                    // Usuário não habilitou GPS ou cancelou
+                    Toast.makeText(this, "GPS precisa estar habilitado para iniciar a rota.", Toast.LENGTH_LONG).show()
+                }
+            )
+            return
+        }
+        
         lifecycleScope.launch {
             try {
-                // Tenta obter localização atual
+                // Tenta obter localização atual de forma robusta
                 var startLat: Double? = null
                 var startLng: Double? = null
+                var startAccuracy: Float? = null
                 
-                try {
-                    if (ContextCompat.checkSelfPermission(
-                            this@AssignmentDetailsActivity,
-                            android.Manifest.permission.ACCESS_FINE_LOCATION
-                        ) == PackageManager.PERMISSION_GRANTED ||
-                        ContextCompat.checkSelfPermission(
-                            this@AssignmentDetailsActivity,
-                            android.Manifest.permission.ACCESS_COARSE_LOCATION
-                        ) == PackageManager.PERMISSION_GRANTED
-                    ) {
-                        val location = fusedLocationClient.lastLocation.result
-                        location?.let {
-                            startLat = it.latitude
-                            startLng = it.longitude
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w("AssignmentDetails", "Não foi possível obter localização: ${e.message}")
+                val initialLocation = getCurrentLocationWithRetry(timeoutSeconds = 10)
+                initialLocation?.let {
+                    startLat = it.latitude
+                    startLng = it.longitude
+                    startAccuracy = it.accuracy
+                    Log.d("AssignmentDetails", "Localização inicial obtida: lat=$startLat, lng=$startLng, accuracy=${startAccuracy}m")
                 }
                 
                 btnStartRoute.isEnabled = false
@@ -411,60 +595,25 @@ class AssignmentDetailsActivity : AppCompatActivity() {
                         // Se falhar, a rota deve ser cancelada
                         val executionId = execution.id
                         
-                        // Obtém localização atual para o evento START (em background thread)
-                        val locationForStart = withContext(Dispatchers.IO) {
-                            try {
-                                var location: Location? = null
-                                
-                                if (ContextCompat.checkSelfPermission(
-                                        this@AssignmentDetailsActivity,
-                                        android.Manifest.permission.ACCESS_FINE_LOCATION
-                                    ) == PackageManager.PERMISSION_GRANTED ||
-                                    ContextCompat.checkSelfPermission(
-                                        this@AssignmentDetailsActivity,
-                                        android.Manifest.permission.ACCESS_COARSE_LOCATION
-                                    ) == PackageManager.PERMISSION_GRANTED
-                                ) {
-                                    // Tenta obter localização atual
-                                    val locationTask = fusedLocationClient.getCurrentLocation(
-                                        Priority.PRIORITY_HIGH_ACCURACY,
-                                        null
-                                    )
-                                    location = Tasks.await(locationTask, 5, TimeUnit.SECONDS)
-                                    
-                                    // Se não conseguir, usa a localização anterior
-                                    if (location == null && startLat != null && startLng != null) {
-                                        location = Location("manual").apply {
-                                            latitude = startLat!!
-                                            longitude = startLng!!
-                                            accuracy = 10f
-                                        }
-                                    }
-                                } else {
-                                    // Se não tem permissão, usa a localização anterior se disponível
-                                    if (startLat != null && startLng != null) {
-                                        location = Location("manual").apply {
-                                            latitude = startLat!!
-                                            longitude = startLng!!
-                                            accuracy = 10f
-                                        }
-                                    }
-                                }
-                                
-                                location
-                            } catch (e: Exception) {
-                                Log.w("AssignmentDetails", "Erro ao obter localização para START: ${e.message}")
-                                // Se não conseguir obter localização, usa a que foi usada para iniciar a execução
-                                if (startLat != null && startLng != null) {
-                                    Location("manual").apply {
-                                        latitude = startLat!!
-                                        longitude = startLng!!
-                                        accuracy = 10f
-                                    }
-                                } else {
-                                    null
-                                }
+                        // Obtém localização atual para o evento START
+                        // Tenta obter uma localização atualizada, mas usa a inicial como fallback
+                        var locationForStart: Location? = null
+                        
+                        // Tenta obter uma localização mais recente (com timeout menor para não demorar muito)
+                        val updatedLocation = getCurrentLocationWithRetry(timeoutSeconds = 5)
+                        
+                        if (updatedLocation != null) {
+                            locationForStart = updatedLocation
+                            Log.d("AssignmentDetails", "Usando localização atualizada para evento START")
+                        } else if (startLat != null && startLng != null) {
+                            // Usa a localização inicial como fallback
+                            locationForStart = Location("manual").apply {
+                                latitude = startLat!!
+                                longitude = startLng!!
+                                accuracy = startAccuracy ?: 50f
+                                time = System.currentTimeMillis()
                             }
+                            Log.d("AssignmentDetails", "Usando localização inicial como fallback para evento START")
                         }
                         
                         if (locationForStart == null) {
@@ -778,6 +927,40 @@ class AssignmentDetailsActivity : AppCompatActivity() {
             putExtra("route_name", routeName)
         }
         startActivity(intent)
+    }
+    
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == PERMISSION_REQUEST_CODE) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                // Permissão concedida
+                Log.d("AssignmentDetails", "Permissão de localização concedida")
+                Toast.makeText(this, "Permissão de localização concedida!", Toast.LENGTH_SHORT).show()
+                
+                // Se o usuário estava tentando iniciar a rota, tenta novamente
+                // (o botão ainda deve estar desabilitado se estava tentando iniciar)
+                if (!btnStartRoute.isEnabled && btnStartRoute.text == "Iniciando...") {
+                    // Usuário estava tentando iniciar, tenta novamente
+                    startRoute()
+                }
+            } else {
+                // Permissão negada
+                Log.w("AssignmentDetails", "Permissão de localização negada")
+                Toast.makeText(
+                    this,
+                    "Permissão de localização é necessária para iniciar a rota.",
+                    Toast.LENGTH_LONG
+                ).show()
+                
+                // Reabilita o botão se estava desabilitado
+                btnStartRoute.isEnabled = true
+                btnStartRoute.text = "Iniciar Rota"
+            }
+        }
     }
     
     override fun onSupportNavigateUp(): Boolean {

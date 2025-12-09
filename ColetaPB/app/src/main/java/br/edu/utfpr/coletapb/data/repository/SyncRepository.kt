@@ -25,11 +25,25 @@ class SyncRepository(private val context: Context, private val prefsHelper: Shar
     private val executionRepository = ExecutionRepository(prefsHelper)
     
     fun isOnline(): Boolean {
-        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val network = connectivityManager.activeNetwork ?: return false
-        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
-        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-               capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        try {
+            val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = connectivityManager.activeNetwork ?: return false
+            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+            
+            // Verifica se tem internet (pode não ter VALIDATED imediatamente, mas ainda ter internet)
+            val hasInternet = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            val hasValidated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            val hasTransport = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                              capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                              capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+            
+            // Considera online se tem internet E (validated OU tem transporte ativo)
+            // Isso é mais tolerante - pode estar online mesmo sem VALIDATED ainda
+            return hasInternet && (hasValidated || hasTransport)
+        } catch (e: Exception) {
+            Log.w("SyncRepository", "Erro ao verificar conectividade: ${e.message}", e)
+            return false
+        }
     }
     
     suspend fun syncPendingData(): SyncResult = withContext(Dispatchers.IO) {
@@ -88,10 +102,18 @@ class SyncRepository(private val context: Context, private val prefsHelper: Shar
                 }
             }
             
-            // 2. Sincronizar registros GPS pendentes
+            // 2. Sincronizar registros GPS pendentes (OFFLINE)
+            // IMPORTANTE: Ordena por timestamp para garantir ordem cronológica
+            // Primeiro enviamos os pontos offline via batch
             val pendingGpsRecords = gpsDao.getPendingSync()
             
-            // Agrupar por executionId
+            if (pendingGpsRecords.isEmpty()) {
+                Log.d("SyncRepository", "Nenhum registro GPS pendente para sincronizar")
+            } else {
+                Log.d("SyncRepository", "📤 Encontrados ${pendingGpsRecords.size} registros GPS OFFLINE pendentes para sincronizar via batch")
+            }
+            
+            // Agrupar por executionId e manter ordem cronológica
             val recordsByExecution = pendingGpsRecords.groupBy { it.executionLocalId }
             
             for ((execLocalId, records) in recordsByExecution) {
@@ -101,38 +123,84 @@ class SyncRepository(private val context: Context, private val prefsHelper: Shar
                     val backendExecutionId = execution?.backendId
                     
                     if (backendExecutionId == null) {
+                        Log.w("SyncRepository", "Execução local $execLocalId não tem backendId, pulando sincronização")
                         errors.add("Execução local $execLocalId não tem backendId")
                         continue
                     }
                     
-                    // Converter para GpsRecordRequest
-                    // IMPORTANTE: Converte timestamp local para UTC antes de enviar
-                    val gpsRequests = records.map { record ->
-                        val timestampUtc = DateUtils.formatLocalToUtc(Date(record.timestamp))
-                        GpsRecordRequest(
-                            latitude = record.lat.toString(),
-                            longitude = record.lng.toString(),
-                            event_type = record.eventType,
-                            is_offline = true,
-                            gps_timestamp = timestampUtc ?: ""
-                        )
-                    }
+                    // Garantir ordem cronológica (já vem ordenado do DAO, mas garantimos aqui também)
+                    val sortedRecords = records.sortedBy { it.timestamp }
                     
-                    // Enviar em lote
-                    val result = gpsRepository.registerGpsBatch(backendExecutionId, gpsRequests)
+                    Log.d("SyncRepository", "🔄 Sincronizando ${sortedRecords.size} registros GPS OFFLINE para execução $backendExecutionId (local: $execLocalId) via /api/v1/executions/$backendExecutionId/gps/batch")
                     
-                    result.onSuccess { savedCount ->
-                        // Marcar como sincronizados
-                        records.forEach { record ->
-                            val updatedRecord = record.copy(isOffline = false)
-                            gpsDao.update(updatedRecord)
+                    // Processar em lotes menores para evitar problemas com muitos registros
+                    // Lote de 50 registros por vez para garantir estabilidade (backend aceita até 500)
+                    val batchSize = 50
+                    val batches = sortedRecords.chunked(batchSize)
+                    
+                    for ((batchIndex, batch) in batches.withIndex()) {
+                        try {
+                            Log.d("SyncRepository", "📦 Processando lote OFFLINE ${batchIndex + 1}/${batches.size} (${batch.size} registros)")
+                            
+                            // Converter para GpsRecordRequest mantendo ordem cronológica
+                            // IMPORTANTE: Converte timestamp local para UTC antes de enviar
+                            // IMPORTANTE: Usa formato simples sem milissegundos (yyyy-MM-ddTHH:mm:ss) para batch
+                            // IMPORTANTE: Marca is_offline = true para indicar que foram salvos offline
+                            val gpsRequests = batch.map { record ->
+                                val timestampUtc = DateUtils.formatLocalToUtcSimple(Date(record.timestamp))
+                                if (timestampUtc == null) {
+                                    Log.w("SyncRepository", "⚠️ Erro ao converter timestamp do registro ${record.id}")
+                                }
+                                GpsRecordRequest(
+                                    latitude = record.lat.toString(),
+                                    longitude = record.lng.toString(),
+                                    event_type = record.eventType,
+                                    is_offline = true, // SEMPRE true pois são pontos offline
+                                    is_automatic = true, // Assumimos que são automáticos
+                                    gps_timestamp = timestampUtc ?: ""
+                                )
+                            }
+                            
+                            Log.d("SyncRepository", "📤 Enviando lote ${batchIndex + 1} via POST /api/v1/executions/$backendExecutionId/gps/batch")
+                            
+                            // Enviar em lote usando a rota batch
+                            val result = gpsRepository.registerGpsBatch(backendExecutionId, gpsRequests)
+                            
+                            result.onSuccess { savedCount ->
+                                if (savedCount > 0) {
+                                    Log.d("SyncRepository", "✅ Lote OFFLINE ${batchIndex + 1} sincronizado com sucesso: $savedCount de ${batch.size} registros")
+                                    
+                                    // Marcar como sincronizados apenas os registros que foram enviados com sucesso
+                                    // IMPORTANTE: Só marca se realmente foi sincronizado (savedCount > 0)
+                                    if (savedCount == batch.size) {
+                                        // Todos foram sincronizados
+                                        batch.forEach { record ->
+                                            val updatedRecord = record.copy(isOffline = false)
+                                            gpsDao.update(updatedRecord)
+                                            Log.d("SyncRepository", "   ✓ Registro ${record.id} marcado como sincronizado (lat=${record.lat}, lng=${record.lng})")
+                                        }
+                                    } else {
+                                        // Apenas alguns foram sincronizados - não marca nenhum para tentar novamente
+                                        Log.w("SyncRepository", "⚠️ Apenas $savedCount de ${batch.size} registros foram sincronizados. Não marcando como sincronizado para tentar novamente.")
+                                    }
+                                    syncedGpsRecords += savedCount
+                                } else {
+                                    Log.w("SyncRepository", "⚠️ Lote OFFLINE ${batchIndex + 1} não sincronizou nenhum registro (0 de ${batch.size}). Verifique os erros acima.")
+                                    errors.add("Lote ${batchIndex + 1}: nenhum registro sincronizado")
+                                    // Não marca como sincronizado, tentará novamente na próxima vez
+                                }
+                            }.onFailure { error ->
+                                Log.e("SyncRepository", "❌ Erro ao sincronizar lote OFFLINE ${batchIndex + 1}: ${error.message}")
+                                errors.add("Erro ao sincronizar GPS (lote ${batchIndex + 1}): ${error.message}")
+                                // Não marca como sincronizado, tentará novamente na próxima vez
+                            }
+                        } catch (e: Exception) {
+                            Log.e("SyncRepository", "❌ Exceção ao processar lote OFFLINE ${batchIndex + 1}: ${e.message}", e)
+                            errors.add("GPS (lote ${batchIndex + 1}): ${e.message}")
                         }
-                        syncedGpsRecords += savedCount
-                    }.onFailure { error ->
-                        errors.add("Erro ao sincronizar GPS: ${error.message}")
                     }
                 } catch (e: Exception) {
-                    Log.e("SyncRepository", "Erro ao sincronizar GPS: ${e.message}")
+                    Log.e("SyncRepository", "❌ Erro ao sincronizar GPS para execução $execLocalId: ${e.message}", e)
                     errors.add("GPS: ${e.message}")
                 }
             }

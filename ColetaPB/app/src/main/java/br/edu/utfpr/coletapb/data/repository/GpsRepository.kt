@@ -200,16 +200,47 @@ class GpsRepository(private val prefsHelper: SharedPreferencesHelper) {
                 map as Map<String, Any>
             }
             
+            Log.d("GpsRepository", "📤 Enviando ${records.size} registros GPS via batch para execução $executionId")
+            
             val response = RetrofitClient.apiService.registerGpsBatch(executionId, recordsMap)
             
             if (response.isSuccessful && response.body() != null) {
                 val body = response.body()!!
-                val savedCount = (body["saved_count"] as? Number)?.toInt() ?: records.size
-                Result.success(savedCount)
+                Log.d("GpsRepository", "✅ Resposta do batch recebida: $body")
+                
+                // O backend retorna a resposta dentro de "data"
+                val data = body["data"] as? Map<*, *>
+                if (data != null) {
+                    Log.d("GpsRepository", "📊 Dados da resposta: $data")
+                    
+                    // Backend retorna "success_count" (não "saved_count")
+                    val successCount = (data["success_count"] as? Number)?.toInt() 
+                        ?: (data["saved_count"] as? Number)?.toInt() // Fallback para compatibilidade
+                        ?: records.size
+                    
+                    val totalRecords = (data["total_records"] as? Number)?.toInt() ?: records.size
+                    val errorCount = (data["error_count"] as? Number)?.toInt() ?: 0
+                    
+                    Log.d("GpsRepository", "✅ Batch sincronizado: $successCount de $totalRecords registros (erros: $errorCount)")
+                    
+                    if (errorCount > 0) {
+                        val errorsList = data["errors"] as? List<*>
+                        Log.w("GpsRepository", "⚠️ Alguns registros falharam: $errorsList")
+                    }
+                    
+                    Result.success(successCount)
+                } else {
+                    // Se não tem "data", tenta ler diretamente do body
+                    val savedCount = (body["saved_count"] as? Number)?.toInt() 
+                        ?: (body["success_count"] as? Number)?.toInt()
+                        ?: records.size
+                    Log.d("GpsRepository", "✅ Batch sincronizado (formato alternativo): $savedCount de ${records.size} registros")
+                    Result.success(savedCount)
+                }
             } else {
                 val errorMsg = response.errorBody()?.string() ?: "Erro desconhecido"
-                Log.e("GpsRepository", "Erro ao registrar GPS em lote: ${response.code()} - $errorMsg")
-                Result.failure(Exception("Erro ao registrar GPS em lote: ${response.code()}"))
+                Log.e("GpsRepository", "❌ Erro ao registrar GPS em lote: HTTP ${response.code()} - $errorMsg")
+                Result.failure(Exception("Erro ao registrar GPS em lote: ${response.code()} - $errorMsg"))
             }
         } catch (e: Exception) {
             Log.e("GpsRepository", "Exceção ao registrar GPS em lote: ${e.message}", e)

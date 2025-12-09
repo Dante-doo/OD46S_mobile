@@ -195,6 +195,20 @@ object DateUtils {
     }
     
     /**
+     * Converte uma data para string ISO 8601 em UTC sem milissegundos
+     * Formato: yyyy-MM-ddTHH:mm:ss (usado para batch GPS)
+     */
+    fun formatLocalToUtcSimple(date: Date?): String? {
+        if (date == null) return null
+        
+        // Formata o Date como string UTC sem milissegundos (formato esperado pelo backend para batch)
+        val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
+        format.timeZone = TimeZone.getTimeZone("UTC")
+        
+        return format.format(date)
+    }
+    
+    /**
      * Calcula a duração entre duas datas
      * Retorna no formato HH:mm (horas:minutos)
      */

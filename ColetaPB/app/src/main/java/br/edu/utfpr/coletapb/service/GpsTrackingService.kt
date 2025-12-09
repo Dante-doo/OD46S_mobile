@@ -6,9 +6,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -27,8 +30,16 @@ import br.edu.utfpr.coletapb.data.model.GpsEventType
 import br.edu.utfpr.coletapb.data.model.GpsRecordLocal
 import br.edu.utfpr.coletapb.data.repository.GpsRepository
 import br.edu.utfpr.coletapb.data.repository.SyncRepository
+import br.edu.utfpr.coletapb.utils.NetworkMonitor
 import com.google.android.gms.location.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -50,10 +61,16 @@ class GpsTrackingService : LifecycleService() {
     private lateinit var gpsRepository: GpsRepository
     private lateinit var syncRepository: SyncRepository
     private lateinit var prefsHelper: SharedPreferencesHelper
+    private lateinit var networkMonitor: NetworkMonitor
     
     // Throttling: última localização enviada
     private var lastSentLocation: Location? = null
     private var lastSentTime: Long = 0L
+    
+    // Sincronização automática
+    private var syncJob: Job? = null
+    private var networkMonitorJob: Job? = null
+    private var periodicSyncJob: Job? = null
     
     // Detecção de movimento: flags para distinguir movimento real de ruído GPS
     private var isMoving: Boolean = false
@@ -81,6 +98,10 @@ class GpsTrackingService : LifecycleService() {
         private const val STOPPED_SPEED_THRESHOLD_MS = 1.0 // Velocidade em m/s abaixo da qual considera parado (~3.6 km/h)
         private const val MIN_MOVEMENT_DISTANCE_METERS = 10.0 // Distância mínima para considerar movimento real (filtra ruído GPS)
         private const val MIN_MOVEMENT_SPEED_MS = 1.0 // Velocidade mínima em m/s para considerar movimento real
+        
+        // Sincronização automática
+        private const val PERIODIC_SYNC_INTERVAL_MS = 60000L // Sincroniza a cada 1 minuto quando online
+        private const val SYNC_RETRY_DELAY_MS = 5000L // Aguarda 5 segundos após internet voltar antes de sincronizar
     }
     
     override fun onCreate() {
@@ -94,6 +115,7 @@ class GpsTrackingService : LifecycleService() {
         prefsHelper = SharedPreferencesHelper(this)
         gpsRepository = GpsRepository(prefsHelper)
         syncRepository = SyncRepository(this, prefsHelper)
+        networkMonitor = NetworkMonitor(this)
         
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         
@@ -232,6 +254,10 @@ class GpsTrackingService : LifecycleService() {
         
         isTracking = true
         
+        // Inicia monitoramento de rede e sincronização automática
+        startNetworkMonitoring()
+        startPeriodicSync()
+        
         try {
             // Usa Looper.getMainLooper() explicitamente para garantir funcionamento em background
             fusedLocationClient.requestLocationUpdates(
@@ -277,11 +303,183 @@ class GpsTrackingService : LifecycleService() {
         isTracking = false
         lastSentLocation = null
         lastSentTime = 0L
+        
+        // Para monitoramento de rede e sincronização
+        stopNetworkMonitoring()
+        stopPeriodicSync()
+        
         Log.d(TAG, "Rastreamento GPS parado")
         
         // Remove a notificação antes de parar o serviço
         stopForeground(true)
         stopSelf()
+    }
+    
+    /**
+     * Inicia o monitoramento de rede para detectar quando a internet volta
+     * e sincronizar automaticamente os pontos pendentes
+     */
+    private fun startNetworkMonitoring() {
+        if (networkMonitorJob?.isActive == true) {
+            return
+        }
+        
+        networkMonitorJob = lifecycleScope.launch(Dispatchers.IO) {
+            var wasOnline = networkMonitor.isOnline()
+            
+            networkMonitor.connectivityFlow()
+                .onEach { isOnline ->
+                    if (isOnline && !wasOnline) {
+                        // Internet voltou! Aguarda um pouco e sincroniza
+                        Log.d(TAG, "🌐 Internet voltou! Aguardando ${SYNC_RETRY_DELAY_MS}ms antes de sincronizar...")
+                        delay(SYNC_RETRY_DELAY_MS)
+                        
+                        // Verifica novamente se ainda está online (usa verificação robusta)
+                        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                        val network = connectivityManager.activeNetwork
+                        val capabilities = network?.let { connectivityManager.getNetworkCapabilities(it) }
+                        
+                        val hasInternet = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                        val hasValidated = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+                        val hasTransport = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true ||
+                                          capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true ||
+                                          capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true
+                        
+                        val isOnline = hasInternet && (hasValidated || hasTransport)
+                        
+                        if (isOnline && isTracking) {
+                            Log.d(TAG, "🔄 Iniciando sincronização automática após internet voltar...")
+                            syncPendingData()
+                        } else {
+                            Log.d(TAG, "⏸️ Internet ainda não está disponível ou tracking parado (hasInternet=$hasInternet, hasValidated=$hasValidated, hasTransport=$hasTransport, isTracking=$isTracking)")
+                        }
+                    }
+                    wasOnline = isOnline
+                }
+                .catch { e ->
+                    Log.e(TAG, "Erro no monitoramento de rede: ${e.message}", e)
+                }
+                .collect { } // Coleta o flow para manter o monitoramento ativo
+        }
+    }
+    
+    /**
+     * Para o monitoramento de rede
+     */
+    private fun stopNetworkMonitoring() {
+        networkMonitorJob?.cancel()
+        networkMonitorJob = null
+    }
+    
+    /**
+     * Inicia sincronização periódica dos pontos pendentes
+     * Sincroniza a cada PERIODIC_SYNC_INTERVAL_MS quando estiver online
+     */
+    private fun startPeriodicSync() {
+        if (periodicSyncJob?.isActive == true) {
+            return
+        }
+        
+        periodicSyncJob = lifecycleScope.launch(Dispatchers.IO) {
+            while (isTracking) {
+                try {
+                    delay(PERIODIC_SYNC_INTERVAL_MS)
+                    
+                    if (!isTracking) {
+                        break
+                    }
+                    
+                    // Verifica se está online antes de tentar sincronizar (usa verificação robusta)
+                    val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                    val network = connectivityManager.activeNetwork
+                    val capabilities = network?.let { connectivityManager.getNetworkCapabilities(it) }
+                    
+                    val hasInternet = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                    val hasValidated = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+                    val hasTransport = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true ||
+                                      capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true ||
+                                      capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true
+                    
+                    val isOnline = hasInternet && (hasValidated || hasTransport)
+                    
+                    if (isOnline) {
+                        Log.d(TAG, "🔄 Sincronização periódica iniciada...")
+                        syncPendingData()
+                    } else {
+                        Log.d(TAG, "⏸️ Sincronização periódica pulada (offline: hasInternet=$hasInternet, hasValidated=$hasValidated, hasTransport=$hasTransport)")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Erro na sincronização periódica: ${e.message}", e)
+                }
+            }
+        }
+    }
+    
+    /**
+     * Para a sincronização periódica
+     */
+    private fun stopPeriodicSync() {
+        periodicSyncJob?.cancel()
+        periodicSyncJob = null
+    }
+    
+    /**
+     * Sincroniza os pontos GPS pendentes mantendo ordem cronológica
+     */
+    private suspend fun syncPendingData() {
+        try {
+            // Verifica conectividade de forma mais robusta (mesma lógica usada em shouldMarkRecordAsOffline)
+            val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = connectivityManager.activeNetwork
+            val capabilities = network?.let { connectivityManager.getNetworkCapabilities(it) }
+            
+            val hasInternet = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+            val hasValidated = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+            val hasTransport = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true ||
+                              capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true ||
+                              capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true
+            
+            val isOnline = hasInternet && (hasValidated || hasTransport)
+            
+            if (!isOnline) {
+                Log.d(TAG, "Não sincronizando: offline (hasInternet=$hasInternet, hasValidated=$hasValidated, hasTransport=$hasTransport)")
+                return
+            }
+            
+            if (prefsHelper.getToken() == null) {
+                Log.w(TAG, "Não sincronizando: token não disponível")
+                return
+            }
+            
+            // Verifica quantos registros pendentes existem antes de sincronizar
+            val pendingCount = try {
+                gpsDao.getPendingSyncCount()
+            } catch (e: Exception) {
+                Log.w(TAG, "Erro ao contar registros pendentes, usando método alternativo: ${e.message}")
+                gpsDao.getPendingSync().size
+            }
+            
+            if (pendingCount > 0) {
+                Log.d(TAG, "🔄 Iniciando sincronização de $pendingCount registros GPS pendentes...")
+            } else {
+                Log.d(TAG, "ℹ️ Nenhum registro GPS pendente para sincronizar")
+                return
+            }
+            
+            val result = syncRepository.syncPendingData()
+            
+            if (result.syncedGpsRecords > 0) {
+                Log.d(TAG, "✅ Sincronização concluída: ${result.syncedGpsRecords} registros GPS sincronizados")
+            } else {
+                Log.d(TAG, "ℹ️ Nenhum registro GPS foi sincronizado (pode ter havido erros)")
+            }
+            
+            if (result.errorMessage != null) {
+                Log.w(TAG, "⚠️ Erros durante sincronização: ${result.errorMessage}")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Erro ao sincronizar dados pendentes: ${e.message}", e)
+        }
     }
     
     /**
@@ -429,6 +627,39 @@ class GpsTrackingService : LifecycleService() {
                 } else {
                     Log.d(TAG, "GPS não enviado ao backend (throttling ou condições não atendidas)")
                 }
+                
+                // Verifica se há pontos pendentes e tenta sincronizar (fora do fluxo normal)
+                // Isso garante que pontos offline sejam sincronizados mesmo quando não há novos pontos
+                lifecycleScope.launch(Dispatchers.IO) {
+                    try {
+                        val pendingCount = try {
+                            gpsDao.getPendingSyncCount()
+                        } catch (e: Exception) {
+                            gpsDao.getPendingSync().size
+                        }
+                        if (pendingCount > 0) {
+                            // Verifica se está online antes de tentar sincronizar
+                            val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                            val network = connectivityManager.activeNetwork
+                            val capabilities = network?.let { connectivityManager.getNetworkCapabilities(it) }
+                            
+                            val hasInternet = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+                            val hasValidated = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+                            val hasTransport = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true ||
+                                              capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true ||
+                                              capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true
+                            
+                            val isOnline = hasInternet && (hasValidated || hasTransport)
+                            
+                            if (isOnline && prefsHelper.getToken() != null) {
+                                Log.d(TAG, "📤 Detectados $pendingCount pontos pendentes, tentando sincronizar...")
+                                syncPendingData()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Erro ao verificar pontos pendentes: ${e.message}")
+                    }
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Erro ao processar GPS: ${e.message}", e)
             }
@@ -498,12 +729,35 @@ class GpsTrackingService : LifecycleService() {
      */
     private fun shouldMarkRecordAsOffline(): Boolean {
         return try {
-            val online = syncRepository.isOnline()
+            // Verifica conectividade de forma mais robusta
+            val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = connectivityManager.activeNetwork
+            val capabilities = network?.let { connectivityManager.getNetworkCapabilities(it) }
+            
+            // Verifica se tem internet (pode não ter VALIDATED imediatamente, mas ainda ter internet)
+            val hasInternet = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+            val hasValidated = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+            val hasTransport = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true ||
+                              capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true ||
+                              capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true
+            
+            // Considera online se tem internet E (validated OU tem transporte ativo)
+            // Isso é mais tolerante - pode estar online mesmo sem VALIDATED ainda
+            val online = hasInternet && (hasValidated || hasTransport)
+            
             val hasToken = prefsHelper.getToken() != null
-            !online || backendExecutionId == null || !hasToken
+            val isOffline = !online || backendExecutionId == null || !hasToken
+            
+            if (isOffline) {
+                Log.d(TAG, "Marcando como offline: hasInternet=$hasInternet, hasValidated=$hasValidated, hasTransport=$hasTransport, online=$online, hasToken=$hasToken, backendId=$backendExecutionId")
+            } else {
+                Log.d(TAG, "✅ Online: hasInternet=$hasInternet, hasValidated=$hasValidated, hasTransport=$hasTransport")
+            }
+            
+            isOffline
         } catch (e: Exception) {
             // Se der erro para checar online, assume offline
-            Log.w(TAG, "Erro ao verificar conectividade: ${e.message}")
+            Log.w(TAG, "Erro ao verificar conectividade: ${e.message}", e)
             true
         }
     }
@@ -545,9 +799,21 @@ class GpsTrackingService : LifecycleService() {
         
         // Se não está online, não envia (será sincronizado depois)
         val isOnline = try {
-            syncRepository.isOnline()
+            // Verifica conectividade de forma mais robusta
+            val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = connectivityManager.activeNetwork
+            val capabilities = network?.let { connectivityManager.getNetworkCapabilities(it) }
+            
+            val hasInternet = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+            val hasValidated = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+            val hasTransport = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true ||
+                              capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true ||
+                              capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true
+            
+            // Considera online se tem internet E (validated OU tem transporte ativo)
+            hasInternet && (hasValidated || hasTransport)
         } catch (e: Exception) {
-            Log.w(TAG, "Erro ao verificar conectividade: ${e.message}")
+            Log.w(TAG, "Erro ao verificar conectividade: ${e.message}", e)
             false
         }
         
@@ -789,6 +1055,12 @@ class GpsTrackingService : LifecycleService() {
     
     override fun onDestroy() {
         Log.w(TAG, "onDestroy() chamado - isTracking=$isTracking")
+        
+        // Para todos os jobs
+        stopNetworkMonitoring()
+        stopPeriodicSync()
+        syncJob?.cancel()
+        
         super.onDestroy()
         if (isTracking) {
             Log.w(TAG, "Serviço sendo destruído mas tracking ainda está ativo! Isso não deveria acontecer.")
