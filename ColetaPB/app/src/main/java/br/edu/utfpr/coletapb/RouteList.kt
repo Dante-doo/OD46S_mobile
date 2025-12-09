@@ -6,9 +6,7 @@ import android.util.Log
 import android.widget.Button
 import android.widget.ListView
 import android.widget.Toast
-import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat.startActivity
 import androidx.lifecycle.lifecycleScope
 import br.edu.utfpr.coletapb.adapter.ItemRoute
 import br.edu.utfpr.coletapb.data.AppDatabase
@@ -22,7 +20,6 @@ import br.edu.utfpr.coletapb.ui.route.RouteViewModel
 import br.edu.utfpr.coletapb.ui.route.RouteViewModelFactory
 import br.edu.utfpr.coletapb.utils.GpsMonitor
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -199,31 +196,74 @@ class RouteList : AppCompatActivity() {
                     is RouteUiState.Idle -> { }
                 }
             }
+            startActivity(it)
         }
     }
 
-    /**
-     * Salva as rotas buscadas no banco de dados local (Room).
-     */
-    private fun saveRoutesToLocalDb(routes: List<RouteEntity>) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            routeDao.clearAllRoutes() // Limpa rotas antigas
-            routeDao.insertAllRoutes(routes) // Insere rotas novas
-        }
+    override fun onStart() {
+        super.onStart()
+        refreshRoutes()
     }
 
-    /**
-     * Carrega as rotas do banco de dados local (útil para offline ou falha de API).
-     */
-    private fun loadRoutesFromLocalDb() {
+    private fun refreshRoutes() {
         lifecycleScope.launch {
-            // Busca todas as rotas salvas
-            val routes = withContext(Dispatchers.IO) { routeDao.getAllRoutes() }
-            Log.d("RouteList", "Carregadas ${routes.size} rotas do banco local (cache).")
-            adapter?.setData(routes)
-            if (routes.isEmpty()) {
-                Toast.makeText(this@RouteList, "Falha na conexão e sem dados em cache.", Toast.LENGTH_LONG).show()
+            try {
+                withContext(Dispatchers.IO) { syncRouteFromAssignment() }
+            } catch (e: Exception) {
+                Log.e("RouteList", "Erro ao sincronizar", e)
+                // Mostra o erro real na tela para facilitar
+                Toast.makeText(this@RouteList, "Erro: ${e.message}", Toast.LENGTH_LONG).show()
             }
+
+            val routes = withContext(Dispatchers.IO) { routeDao.getAllRoutes() }
+
+            if (adapter == null) {
+                adapter = ItemRoute(this@RouteList, routes.toMutableList())
+                listView.adapter = adapter
+            } else {
+                adapter?.setData(routes)
+            }
+
+            if (routes.isEmpty()) {
+                Toast.makeText(this@RouteList, "Nenhuma rota encontrada.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private suspend fun syncRouteFromAssignment() {
+        val response = RetrofitClient.getApiService(applicationContext).getMyAssignment()
+
+        if (response.isSuccessful) {
+            val assignment = response.body()?.data?.assignment
+
+            if (assignment != null) {
+                val dto = assignment.route
+
+                // CORREÇÃO: Usamos o operador elvis (?:) para definir valores padrão
+                // caso a API não envie o campo ou envie nulo.
+                val entity = RouteEntity(
+                    id = dto.id,
+                    name = dto.name,
+                    description = dto.description ?: "Sem descrição",
+
+                    // Se collection_type vier nulo, define um padrão
+                    collection_type = dto.collection_type ?: "NORMAL",
+
+                    periodicity = dto.periodicity,
+
+                    // Se priority vier nulo, define "MEDIUM"
+                    priority = dto.priority ?: "MEDIUM",
+
+                    // Se números vierem nulos, define 0
+                    estimated_time_minutes = dto.estimated_time_minutes ?: 0,
+                    distance_km = dto.distance_km ?: 0.0
+                )
+
+                routeDao.clearAllRoutes()
+                routeDao.insertAllRoutes(listOf(entity))
+            }
+        } else {
+            Log.w("RouteList", "Erro API: ${response.code()}")
         }
     }
 

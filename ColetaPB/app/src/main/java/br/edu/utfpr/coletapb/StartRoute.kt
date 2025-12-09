@@ -140,7 +140,6 @@ class StartRoute : AppCompatActivity() {
     // extras
     private var routeId: Long = 0L
     private var routeName: String? = null
-    private var routeInfo: String? = null
 
     // Nota: Para formatação de datas, usar DateUtils que já trata timezone corretamente
     
@@ -319,10 +318,17 @@ class StartRoute : AppCompatActivity() {
             )
         }
 
-        // DB
         db = AppDatabase.getDatabase(this)
         executionDao = db.executionDao()
         gpsDao = db.gpsDao()
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        setupLocationCallback()
+
+        if (savedInstanceState != null) {
+            restoreInstanceState(savedInstanceState)
+        } else {
+            checkForActiveExecution()
+        }
 
         // Configura SSL globalmente para o OSMDroid
         // Isso é necessário porque o OSMDroid usa HttpURLConnection que não respeita network_security_config.xml
@@ -548,6 +554,16 @@ class StartRoute : AppCompatActivity() {
         
         // Aplica estado inicial (será atualizado após checkCurrentExecution)
         applyUiState()
+        fetchAssignment()
+
+        btStart.setOnClickListener {
+            if (currentAssignmentId == null) {
+                fetchAssignment()
+                Toast.makeText(this, "Buscando escala...", Toast.LENGTH_SHORT).show()
+            } else {
+                checkPermissionsAndShowDialog()
+            }
+        }
 
         // Inicializa Activity Result Launcher
         pointsListLauncher = registerForActivityResult(
@@ -1408,6 +1424,28 @@ class StartRoute : AppCompatActivity() {
             return
         }
 
+    private fun startRouteWithLocation(initialKm: Int) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "Sem permissão de GPS", Toast.LENGTH_SHORT).show()
+            return
+        }
+        startLocationUpdates()
+        Toast.makeText(this, "Iniciando...", Toast.LENGTH_SHORT).show()
+        try {
+            fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
+                val lat = loc?.latitude ?: 0.0
+                val lng = loc?.longitude ?: 0.0
+                createExecution(lat, lng, initialKm)
+            }.addOnFailureListener {
+                createExecution(0.0, 0.0, initialKm)
+            }
+        } catch (e: SecurityException) {
+            createExecution(0.0, 0.0, initialKm)
+        }
+    }
+
+    private fun createExecution(lat: Double, lng: Double, initialKm: Int) {
+        if (routeStarted) return
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 // Verifica periodicity se tiver assignmentId
@@ -2128,6 +2166,12 @@ class StartRoute : AppCompatActivity() {
             if (!isTaskRoot) {
                 finish()
             }
+        } catch (e: Exception) {
+            Log.e("UploadPhoto", "Exceção no upload: ${e.message}", e)
+            withContext(Dispatchers.Main) {
+                Toast.makeText(applicationContext, "Erro de conexão ao enviar foto", Toast.LENGTH_SHORT).show()
+            }
+            e.printStackTrace()
         }
     }
 
@@ -2147,10 +2191,52 @@ class StartRoute : AppCompatActivity() {
             " - ${DateUtils.formatForDisplay(Date(it.timestamp), "dd/MM/yyyy", "HH:mm:ss")}"
         }
 
-        return Triple(startStr, endStr, IncidentInfo(incidents.size, times))
+    private fun showKmDialog(isStart: Boolean) {
+        val input = EditText(this)
+        input.inputType = InputType.TYPE_CLASS_NUMBER
+        input.hint = "KM do Painel"
+        AlertDialog.Builder(this)
+            .setTitle(if (isStart) "Iniciar" else "Finalizar")
+            .setView(input)
+            .setPositiveButton("OK") { _, _ ->
+                val km = input.text.toString().toIntOrNull()
+                if (km != null) {
+                    if (isStart) startRouteWithLocation(km) else finishRoute(km)
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
     }
 
-    data class IncidentInfo(val count: Int, val times: String)
+    private fun setupLocationCallback() {
+        locationCallback = object : LocationCallback() {
+            override fun onLocationResult(res: LocationResult) {
+                res.lastLocation?.let {
+                    lastLocation = it
+                    tvStatus.text = "GPS: %.4f, %.4f".format(it.latitude, it.longitude)
+                    if (routeStarted && execLocalId != 0L) saveGpsPoint(it)
+                }
+            }
+        }
+    }
+
+    private fun startLocationUpdates() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
+        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10000).build()
+        try {
+            fusedLocationClient.requestLocationUpdates(req, locationCallback, android.os.Looper.getMainLooper())
+        } catch (e: Exception) {}
+    }
+
+    private fun stopLocationUpdates() {
+        try { fusedLocationClient.removeLocationUpdates(locationCallback) } catch (e: Exception) {}
+    }
+
+    private fun saveGpsPoint(loc: Location) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            gpsDao.insert(GpsRecordLocal(executionLocalId = execLocalId, timestamp = loc.time, lat = loc.latitude, lng = loc.longitude, eventType = "NORMAL"))
+        }
+    }
 
     private fun loadRoutePoints() {
         lifecycleScope.launch(Dispatchers.IO) {

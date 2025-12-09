@@ -6,7 +6,7 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "gps_records_local")
 data class GpsRecordLocal(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
-    val executionLocalId: Long,   // FK local → ExecutionLocal.localId
+    val executionLocalId: Long,
     val timestamp: Long,
     val lat: Double,
     val lng: Double,

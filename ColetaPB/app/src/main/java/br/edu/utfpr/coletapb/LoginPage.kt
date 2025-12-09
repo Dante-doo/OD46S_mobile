@@ -2,10 +2,9 @@ package br.edu.utfpr.coletapb
 
 import android.content.Intent
 import android.os.Bundle
-import android.util.Log
-import android.util.Patterns
 import android.widget.Button
 import android.widget.Toast
+import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import br.edu.utfpr.coletapb.config.ApiConfig
@@ -141,6 +140,17 @@ class LoginPage : AppCompatActivity() {
                     btLogin.isEnabled = true
                     btLogin.text = "Entrar"
                 }
+            }
+        }
+
+        btLogin.setOnClickListener {
+            val emailOrCpf = etEmailOrCpf.text.toString().trim()
+            val password = etPassword.text.toString().trim()
+
+            if (emailOrCpf.isNotEmpty() && password.isNotEmpty()) {
+                viewModel.login(emailOrCpf, password)
+            } else {
+                Toast.makeText(this, "Preencha todos os campos", Toast.LENGTH_SHORT).show()
             }
         }
     }

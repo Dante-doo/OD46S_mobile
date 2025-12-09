@@ -1,4 +1,4 @@
-package br.edu.utfpr.coletapb.data
+package br.edu.utfpr.coletapb.data.model
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey

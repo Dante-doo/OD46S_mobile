@@ -39,23 +39,18 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
+
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
-
-        <!-- Após login -->
+        </activity> <!-- Após login -->
         <activity
             android:name=".TruckList"
             android:exported="false"
-            android:parentActivityName=".LoginPage" />
-
-        <!-- Da lista de caminhões para rotas -->
+            android:parentActivityName=".LoginPage" /> <!-- Da lista de caminhões para rotas -->
         <activity
             android:name=".RouteList"
             android:exported="false"
-            android:parentActivityName=".TruckList" />
-
-        <!-- Da lista de rotas para iniciar rota -->
+            android:parentActivityName=".TruckList" /> <!-- Da lista de rotas para iniciar rota -->
         <activity
             android:name=".StartRoute"
             android:exported="false"
@@ -128,4 +123,5 @@
         </provider>
 
     </application>
+
 </manifest>

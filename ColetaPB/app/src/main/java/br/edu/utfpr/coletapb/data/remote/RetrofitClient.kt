@@ -7,8 +7,6 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 
-// Usamos 'object' para criar um Singleton. Isso garante que teremos apenas
-// uma instância do Retrofit em todo o app.
 object RetrofitClient {
     
     private var context: Context? = null
@@ -36,9 +34,12 @@ object RetrofitClient {
             .build() // 3. Constrói o objeto Retrofit
     }
 
-    // Cria a implementação da nossa interface ApiService de forma "preguiçosa" (lazy)
-    // O código dentro do 'by lazy' só será executado na primeira vez que 'apiService' for chamado.
-    val apiService: ApiService by lazy {
-        retrofit.create(ApiService::class.java)
+            retrofit = Retrofit.Builder()
+                .baseUrl(BASE_URL)
+                .client(client)
+                .addConverterFactory(GsonConverterFactory.create())
+                .build()
+        }
+        return retrofit!!.create(ApiService::class.java)
     }
 }
